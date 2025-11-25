@@ -76,6 +76,9 @@ def train(
     else:
         m = deepforest(config=config)
 
+    # Set matmul precision
+    torch.set_float32_matmul_precision(config.matmul_precision)
+
     callbacks = []
     loggers = []
     log_root = Path(config.train.log_root)
@@ -162,6 +165,7 @@ def train(
         callbacks=callbacks,
         gradient_clip_val=0.5,
         accelerator=config.accelerator,
+        precision=config.training_precision,
         strategy="ddp_find_unused_parameters_true"
         if torch.cuda.is_available()
         else "auto",
