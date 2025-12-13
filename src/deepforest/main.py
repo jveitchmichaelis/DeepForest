@@ -999,9 +999,44 @@ class deepforest(pl.LightningModule):
         return results
 
     def configure_optimizers(self):
-        optimizer = optim.SGD(
-            self.model.parameters(), lr=self.config.train.lr, momentum=0.9
-        )
+        if self.config.train.lr_backbone != self.config.train.lr:
+            params = [
+                {
+                    "params": [
+                        p
+                        for n, p in self.model.named_parameters()
+                        if "backbone" not in n and p.requires_grad
+                    ],
+                    "name": "head",
+                },
+                {
+                    "params": [
+                        p
+                        for n, p in self.model.named_parameters()
+                        if "backbone" in n and p.requires_grad
+                    ],
+                    "lr": self.config.train.lr_backbone,
+                    "name": "backbone",
+                },
+            ]
+        else:
+            params = self.model.parameters()
+
+        if self.config.train.optimizer.lower() == "sgd":
+            optimizer = optim.SGD(
+                params,
+                momentum=0.9,
+                weight_decay=self.config.train.weight_decay,
+            )
+        elif self.config.train.optimizer.lower() == "adamw":
+            optimizer = optim.AdamW(
+                params,
+                weight_decay=self.config.train.weight_decay,
+            )
+        else:
+            raise ValueError(
+                f"Only SGD and AdamW are currently supported optimizers, got: {self.config.train.optimizer.lower()}"
+            )
 
         scheduler_config = self.config.train.scheduler
         scheduler_type = scheduler_config.type

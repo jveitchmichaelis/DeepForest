@@ -47,6 +47,9 @@ train:
 
     # Optimizer initial learning rate
     lr: 0.001
+    lr_backbone: 0.001
+    optimizer: sgd
+    weight_decay: 0.1 # For AdamW
 
     # Data augmentations for training
     # Augmentations must be a list of augmentation names, or a list

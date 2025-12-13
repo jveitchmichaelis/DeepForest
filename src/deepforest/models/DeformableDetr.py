@@ -85,13 +85,18 @@ class DeformableDetrWrapper(nn.Module):
                 if isinstance(label, torch.Tensor):
                     label = label.item()
 
+                # Convert from [xmin, ymin, xmax, ymax] to COCO format [x, y, width, height]
+                xmin, ymin, xmax, ymax = box
+                coco_bbox = [xmin, ymin, xmax - xmin, ymax - ymin]
+                area = (xmax - xmin) * (ymax - ymin)
+
                 annotations_for_target.append(
                     {
                         "id": i,
                         "image_id": i,
                         "category_id": label,
-                        "bbox": box,
-                        "area": (box[3] - box[1]) * (box[2] - box[0]),
+                        "bbox": coco_bbox,
+                        "area": area,
                         "iscrowd": 0,
                     }
                 )
@@ -167,12 +172,25 @@ class DeformableDetrWrapper(nn.Module):
         preds = self.net(**encoded_inputs)
 
         if targets is None or not self.training:
+            # Handle padding for mixed-size batches
+            if isinstance(images, list):
+                original_sizes = []
+                for i in images:
+                    if len(i.shape) == 3 and i.shape[2] in [1, 3, 4]:  # HWC format
+                        original_sizes.append((i.shape[0], i.shape[1]))
+                    else:  # CHW format
+                        original_sizes.append((i.shape[-2], i.shape[-1]))
+            else:
+                if len(images.shape) == 3 and images.shape[2] in [1, 3, 4]:  # HWC
+                    original_sizes = [(images.shape[0], images.shape[1])]
+                else:  # CHW
+                    original_sizes = [(images.shape[-2], images.shape[-1])]
+
             results = self.processor.post_process_object_detection(
                 preds,
                 threshold=self.config.score_thresh,
-                target_sizes=[i.shape[-2:] for i in images]
-                if isinstance(images, list)
-                else [images.shape[-2:]],
+                target_sizes=original_sizes,
+                top_k=self.net.config.num_queries,
             )
 
             # DETR is specifically designed to be NMS-free, however we've seen cases
@@ -182,6 +200,8 @@ class DeformableDetrWrapper(nn.Module):
 
             return results
         else:
+            # Invalid for DeforambleDETR
+            preds.loss_dict.pop("cardinality_error", None)
             return preds.loss_dict
 
 

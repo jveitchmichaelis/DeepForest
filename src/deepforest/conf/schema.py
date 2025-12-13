@@ -64,6 +64,9 @@ class TrainConfig:
     root_dir: str | None = MISSING
     log_root: str = "logs"
     lr: float = 0.001
+    lr_backbone: float = 0.001
+    optimizer: str = "sgd"
+    weight_decay: float = 0
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     epochs: int = 1
     fast_dev_run: bool = False

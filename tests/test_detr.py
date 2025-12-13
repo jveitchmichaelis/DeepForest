@@ -1,12 +1,15 @@
 # test Transformers/detr
 import os
 
+import geopandas as gpd
 import numpy as np
 import pytest
 import torch
 from PIL import Image
+from shapely.geometry import box
 
 from deepforest import get_data
+from deepforest.IoU import compute_IoU
 from deepforest import utilities
 from deepforest.datasets.training import BoxDataset
 from deepforest.models import DeformableDetr
@@ -72,30 +75,41 @@ def test_create_model(config, num_classes):
 
 def test_boxes_in_output(config):
     """
-    Test that a reference input image yields predictions that
-    include boxes, scores and labels. This model should have
-    trained weights.
+    Test that a reference input image produces predictions with a decent IoU using
+    a known-trained model.
     """
+    from deepforest.IoU import compute_IoU
+
     detr_model = DeformableDetr.Model(config).create_model(config.model.name, revision=config.model.revision)
     detr_model.eval()
 
     image_path = get_data("OSBS_029.png")
+    image = np.array(Image.open(image_path)).astype(np.float32) / 255.0
 
-    # Passing a numpy array (or tensor) should work:
-    result = detr_model(np.array(Image.open(image_path)))
+    # Load ground truth and convert to GeoDataFrame
+    annotations_file = get_data("OSBS_029.csv")
+    ground_truth = utilities.read_file(annotations_file)
 
-    for r in result:
-        assert "boxes" in r
-        assert "scores" in r
-        assert "labels" in r
+    # Get predictions
+    result = detr_model([image])
 
-    # Passing a list is also allowed:
-    result = detr_model([np.array(Image.open(image_path))])
+    assert len(result) == 1
+    r = result[0]
+    assert "boxes" in r
+    assert "scores" in r
+    assert "labels" in r
 
-    for r in result:
-        assert "boxes" in r
-        assert "scores" in r
-        assert "labels" in r
+    # Convert predictions to GeoDataFrame using utilities
+    pred_df = utilities.format_boxes(r, scores=True)
+    assert pred_df is not None, "Model produced no predictions"
+
+    pred_gdf = utilities.to_gdf(pred_df)
+
+    result_df = compute_IoU(ground_truth, pred_gdf)
+
+    # Check for reasonable IoU
+    true_positives = result_df[result_df['IoU'] > 0.4]
+    assert len(true_positives) > 0, "No predictions matched ground truth at IoU>0.4"
 
 
 def test_forward_sample_dummy(config, coco_sample):
@@ -131,3 +145,80 @@ def test_training_sample(config):
 
     # Assert non-zero loss
     assert sum([loss for loss in loss_dict.values()]) > 0
+
+
+def test_prepare_targets_coco_format(config):
+    """
+    Test conversion to COCO format for targets.
+    """
+    detr_model = DeformableDetr.Model(config).create_model()
+
+    x1, y1, w1, h1 = 10.0, 20.0, 40.0, 60.0
+    x2, y2, w2, h2 = 100.0, 150.0, 100.0, 150.0
+
+    target = {
+        "labels": torch.tensor([0, 1]),
+        "boxes": torch.tensor([
+            [x1, y1, x1 + w1, y1 + h1],
+            [x2, y2, x2 + w2, y2 + h2],
+        ]),
+    }
+
+    coco_targets = detr_model._prepare_targets([target])
+
+    # Expect 1 group with 2 annotations, IDs shouldn't matter
+    assert len(coco_targets) == 1
+    assert coco_targets[0]["image_id"] == 0
+    assert "annotations" in coco_targets[0]
+
+    annotations = coco_targets[0]["annotations"]
+    assert len(annotations) == 2
+
+    # First annotation
+    assert annotations[0]["id"] == 0
+    assert annotations[0]["image_id"] == 0
+    assert annotations[0]["category_id"] == 0
+    assert annotations[0]["bbox"] == [x1, y1, w1, h1]
+    assert annotations[0]["area"] == w1 * h1
+    assert annotations[0]["iscrowd"] == 0
+
+    # Second annotation
+    assert annotations[1]["id"] == 1
+    assert annotations[1]["image_id"] == 1
+    assert annotations[1]["category_id"] == 1
+    assert annotations[1]["bbox"] == [x2, y2, w2, h2]
+    assert annotations[1]["area"] == w2 * h2
+    assert annotations[1]["iscrowd"] == 0
+
+
+def test_mixed_size_batch_padding(config):
+    """
+    Test that predictions from mixed-size batches are correctly aligned to input images.
+    """
+
+    detr_model = DeformableDetr.Model(config).create_model(config.model.name, revision=config.model.revision)
+    detr_model.eval()
+
+    # OSBS_029 (400x400)
+    image_path1 = get_data("OSBS_029.png")
+    annotations_file1 = get_data("OSBS_029.csv")
+    gt1 = utilities.read_file(annotations_file1)
+    image1 = np.array(Image.open(image_path1)).astype(np.float32) / 255.0
+
+    # 2019_YELL_2_541000_4977000_image_crop (1249x1035)
+    image_path2 = get_data("2019_YELL_2_541000_4977000_image_crop.png")
+    annotations_file2 = get_data("2019_YELL_2_541000_4977000_image_crop.xml")
+    gt2 = utilities.read_file(annotations_file2)
+    image2 = np.array(Image.open(image_path2)).astype(np.float32) / 255.0
+
+    # Run predictions on mixed-size batch
+    results = detr_model([image1, image2])
+
+    # Validate predictions align with ground truth via IoU
+    for i, (result, gt) in enumerate([(results[0], gt1), (results[1], gt2)]):
+        if result["boxes"].shape[0] > 0 and len(gt) > 0:
+            pred_df = utilities.format_boxes(result, scores=True)
+            if pred_df is not None:
+                pred_gdf = utilities.to_gdf(pred_df)
+                iou_result = compute_IoU(gt, pred_gdf)
+                assert (iou_result['IoU'] > 0.4).any(), f"Image{i+1} predictions don't align with ground truth, test IoU: {iou_result['IoU']}"
