@@ -66,7 +66,7 @@ def train(
 
     if "ckpt" in config.model.name and os.path.exists(config.model.name):
         m = deepforest.load_from_checkpoint(
-            config.model.name, map_location=config.accelerator
+            config.model.name, map_location=config.accelerator, weights_only=False
         )
 
         # Update config with user-provided, and ensure
@@ -239,7 +239,7 @@ def predict(
 
     if "ckpt" in config.model.name and os.path.exists(config.model.name):
         m = deepforest.load_from_checkpoint(
-            config.model.name, map_location=config.accelerator
+            config.model.name, map_location=config.accelerator, weights_only=False
         )
 
         # Update config with user-provided, and ensure

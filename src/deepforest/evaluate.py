@@ -1,6 +1,5 @@
 """Evaluation module."""
 
-import os
 import warnings
 
 import geopandas as gpd
@@ -194,9 +193,6 @@ def evaluate_boxes(predictions, ground_df, iou_threshold=0.4):
         image_predictions = predictions_by_image.get(image_path, pd.DataFrame())
         if not isinstance(image_predictions, pd.DataFrame) or image_predictions.empty:
             image_predictions = pd.DataFrame()
-
-        name = os.path.basename(image_path)
-        pbar.set_description(f"{name[:20]}, {len(image_predictions)} preds")
 
         recall, precision, result = _box_recall_image(
             image_predictions, image_gt, iou_threshold=iou_threshold

@@ -74,7 +74,16 @@ class ImagesCallback(Callback):
             pl_module.print("Logging validation dataset samples.")
             val_ds = trainer.val_dataloaders.dataset
             self._log_dataset_sample(val_ds, split="validation")
-            self.num_val_batches = len(trainer.val_dataloaders)
+
+            if (
+                isinstance(trainer.limit_val_batches, int)
+                and trainer.limit_val_batches > 1
+            ):
+                self.num_val_batches = trainer.limit_val_batches
+            else:
+                self.num_val_batches = int(
+                    len(trainer.val_dataloaders) * trainer.limit_val_batches
+                )
 
     def on_validation_start(self, trainer, pl_module):
         """Pick batch indices for plotting, or skip."""
