@@ -21,7 +21,7 @@ class DeformableDetrWrapper(nn.Module):
     so that input pre- and post-processing happens transparently."""
 
     def __init__(
-        self, config, name, revision, use_nms=False, freeze_backbone=False, **hf_args
+        self, config, name, revision, use_nms=True, freeze_backbone=False, **hf_args
     ):
         """Initialize a DeformableDetrForObjectDetection model.
 
