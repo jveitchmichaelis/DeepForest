@@ -110,8 +110,7 @@ class ImagesCallback(Callback):
 
         # NB: Dataloader idx is the i'th dataloader
         if batch_idx in self.batch_indices:
-            # Last predictions (validation_step)
-            _, batch_targets, image_names = batch
+            images, batch_targets, image_names = batch
             batch_preds = [p for p in pl_module.last_preds if p is not None]
 
             if len(batch_preds) == 0:
@@ -124,6 +123,7 @@ class ImagesCallback(Callback):
                 targets = utilities.format_geometry(batch_targets[idx], scores=False)
                 preds = batch_preds[idx].copy()
                 image_name = image_names[idx]
+                image = images[idx]
 
                 if preds.image_path.unique()[0] != image_name:
                     warnings.warn(
@@ -132,12 +132,15 @@ class ImagesCallback(Callback):
                     )
                 else:
                     self._log_prediction_sample(
-                        trainer, pl_module, preds, targets, image_name
+                        trainer, pl_module, preds, targets, image_name, image
                     )
 
-    def _log_prediction_sample(self, trainer, pl_module, preds, targets, image_name):
-        dataset = trainer.val_dataloaders.dataset
+    def _log_prediction_sample(
+        self, trainer, pl_module, preds, targets, image_name, image
+    ):
         """Log one sample."""
+        dataset = trainer.val_dataloaders.dataset
+
         # Add root_dir to the dataframe
         if "root_dir" not in preds.columns:
             preds["root_dir"] = dataset.root_dir
@@ -152,6 +155,9 @@ class ImagesCallback(Callback):
         out_dir = os.path.join(self.savedir, "predictions")
         os.makedirs(out_dir, exist_ok=True)
 
+        image_np = image.cpu().numpy().transpose((1, 2, 0))
+        image_np = np.clip(image_np * 255, 0, 255).astype(np.uint8)
+
         basename = Path(image_name).stem + f"_{trainer.global_step}"
         fig = visualize.plot_results(
             basename=basename,
@@ -161,6 +167,7 @@ class ImagesCallback(Callback):
             results_color=results_color,
             thickness=self.thickness,
             show=False,
+            image=image_np,
         )
         plt.close(fig)
 
