@@ -1,17 +1,14 @@
 # test Transformers/detr
 import os
 
-import geopandas as gpd
 import numpy as np
 import pytest
 import torch
 from PIL import Image
-from shapely.geometry import box
 
-from deepforest import get_data
-from deepforest.IoU import compute_IoU
-from deepforest import utilities
+from deepforest import get_data, utilities
 from deepforest.datasets.training import BoxDataset
+from deepforest.IoU import compute_IoU
 from deepforest.models import DeformableDetr
 
 
@@ -35,14 +32,16 @@ def coco_sample():
     target = {
         "labels": torch.zeros(0, dtype=torch.int64),
         "image_id": 4,
-        "annotations": [{
-            "id": 0,
-            "image_id": 4,
-            "category_id": 0,
-            "bbox": [0, 0, 10, 10],
-            "area": 10,
-            "iscrowd": 0,
-        }]
+        "annotations": [
+            {
+                "id": 0,
+                "image_id": 4,
+                "category_id": 0,
+                "bbox": [0, 0, 10, 10],
+                "area": 10,
+                "iscrowd": 0,
+            }
+        ],
     }
 
     targets = [target]
@@ -80,7 +79,9 @@ def test_boxes_in_output(config):
     """
     from deepforest.IoU import compute_IoU
 
-    detr_model = DeformableDetr.Model(config).create_model(config.model.name, revision=config.model.revision)
+    detr_model = DeformableDetr.Model(config).create_model(
+        config.model.name, revision=config.model.revision
+    )
     detr_model.eval()
 
     image_path = get_data("OSBS_029.png")
@@ -108,7 +109,7 @@ def test_boxes_in_output(config):
     result_df = compute_IoU(ground_truth, pred_gdf)
 
     # Check for reasonable IoU
-    true_positives = result_df[result_df['IoU'] > 0.4]
+    true_positives = result_df[result_df["IoU"] > 0.4]
     assert len(true_positives) > 0, "No predictions matched ground truth at IoU>0.4"
 
 
@@ -124,7 +125,7 @@ def test_forward_sample_dummy(config, coco_sample):
     loss_dict = detr_model(image, targets, prepare_targets=False)
 
     # Assert non-zero loss
-    assert sum([loss for loss in loss_dict.values()]) > 0
+    assert sum(list(loss_dict.values())) > 0
 
 
 def test_training_sample(config):
@@ -144,7 +145,7 @@ def test_training_sample(config):
     loss_dict = detr_model(image, targets)
 
     # Assert non-zero loss
-    assert sum([loss for loss in loss_dict.values()]) > 0
+    assert sum(list(loss_dict.values())) > 0
 
 
 def test_prepare_targets_coco_format(config):
@@ -158,10 +159,12 @@ def test_prepare_targets_coco_format(config):
 
     target = {
         "labels": torch.tensor([0, 1]),
-        "boxes": torch.tensor([
-            [x1, y1, x1 + w1, y1 + h1],
-            [x2, y2, x2 + w2, y2 + h2],
-        ]),
+        "boxes": torch.tensor(
+            [
+                [x1, y1, x1 + w1, y1 + h1],
+                [x2, y2, x2 + w2, y2 + h2],
+            ]
+        ),
     }
 
     coco_targets = detr_model._prepare_targets([target])
@@ -196,7 +199,9 @@ def test_mixed_size_batch_padding(config):
     Test that predictions from mixed-size batches are correctly aligned to input images.
     """
 
-    detr_model = DeformableDetr.Model(config).create_model(config.model.name, revision=config.model.revision)
+    detr_model = DeformableDetr.Model(config).create_model(
+        config.model.name, revision=config.model.revision
+    )
     detr_model.eval()
 
     # OSBS_029 (400x400)
@@ -221,4 +226,45 @@ def test_mixed_size_batch_padding(config):
             if pred_df is not None:
                 pred_gdf = utilities.to_gdf(pred_df)
                 iou_result = compute_IoU(gt, pred_gdf)
-                assert (iou_result['IoU'] > 0.4).any(), f"Image{i+1} predictions don't align with ground truth, test IoU: {iou_result['IoU']}"
+                assert (iou_result["IoU"] > 0.4).any(), (
+                    f"Image{i + 1} predictions don't align with ground truth, test IoU: {iou_result['IoU']}"
+                )
+
+
+def test_freeze_backbone(config):
+    """
+    Test that freeze_backbone parameter correctly freezes backbone parameters.
+    """
+    # Freeze
+    config.train.freeze_backbone = True
+    detr_model = DeformableDetr.Model(config).create_model()
+
+    backbone_params_frozen = sum(
+        1
+        for p in detr_model.net.model.backbone.conv_encoder.model.parameters()
+        if not p.requires_grad
+    )
+    backbone_params_trainable = sum(
+        1
+        for p in detr_model.net.model.backbone.conv_encoder.model.parameters()
+        if p.requires_grad
+    )
+
+    assert backbone_params_frozen > 0, "No backbone parameters were frozen"
+    assert backbone_params_trainable == 0, (
+        f"Expected all backbone params frozen, but {backbone_params_trainable} are trainable"
+    )
+
+    # Unfreeze
+    config.train.freeze_backbone = False
+    detr_model_unfrozen = DeformableDetr.Model(config).create_model()
+
+    backbone_params_trainable_unfrozen = sum(
+        1
+        for p in detr_model_unfrozen.net.model.backbone.conv_encoder.model.parameters()
+        if p.requires_grad
+    )
+
+    assert backbone_params_trainable_unfrozen > 0, (
+        "Backbone should be trainable when freeze_backbone=False"
+    )

@@ -20,7 +20,9 @@ class DeformableDetrWrapper(nn.Module):
     """This class wraps a transformers DeformableDetrForObjectDetection model
     so that input pre- and post-processing happens transparently."""
 
-    def __init__(self, config, name, revision, use_nms=False, **hf_args):
+    def __init__(
+        self, config, name, revision, use_nms=False, freeze_backbone=False, **hf_args
+    ):
         """Initialize a DeformableDetrForObjectDetection model.
 
         We assume that the provided name applies to both model and
@@ -30,6 +32,7 @@ class DeformableDetrWrapper(nn.Module):
         super().__init__()
         self.config = config
         self.use_nms = use_nms
+        self.freeze_backbone = freeze_backbone
 
         # This suppresses a bunch of messages which are specific to DETR,
         # but do not impact model function.
@@ -65,6 +68,11 @@ class DeformableDetrWrapper(nn.Module):
             # For consistency with other DeepForest components
             self.label_dict = self.net.config.label2id
             self.num_classes = self.net.config.num_labels
+
+            # Freeze backbone if requested
+            if self.freeze_backbone:
+                for param in self.net.model.backbone.conv_encoder.model.parameters():
+                    param.requires_grad = False
 
     def _prepare_targets(self, targets):
         """This is an internal function which translates BoxDataset targets
@@ -172,19 +180,12 @@ class DeformableDetrWrapper(nn.Module):
         preds = self.net(**encoded_inputs)
 
         if targets is None or not self.training:
-            # Handle padding for mixed-size batches
-            if isinstance(images, list):
-                original_sizes = []
-                for i in images:
-                    if len(i.shape) == 3 and i.shape[2] in [1, 3, 4]:  # HWC format
-                        original_sizes.append((i.shape[0], i.shape[1]))
-                    else:  # CHW format
-                        original_sizes.append((i.shape[-2], i.shape[-1]))
-            else:
-                if len(images.shape) == 3 and images.shape[2] in [1, 3, 4]:  # HWC
-                    original_sizes = [(images.shape[0], images.shape[1])]
-                else:  # CHW
-                    original_sizes = [(images.shape[-2], images.shape[-1])]
+            original_sizes = []
+            for img in images:
+                if isinstance(img, torch.Tensor):
+                    original_sizes.append((img.shape[-2], img.shape[-1]))  # CHW -> (H, W)
+                else:
+                    original_sizes.append((img.shape[0], img.shape[1]))  # HWC -> (H, W)
 
             results = self.processor.post_process_object_detection(
                 preds,
@@ -233,5 +234,9 @@ class Model(BaseModel):
             hf_args.setdefault("id2label", self.config.numeric_to_label_dict)
 
         return DeformableDetrWrapper(
-            self.config, name=pretrained, revision=revision, **hf_args
+            self.config,
+            name=pretrained,
+            revision=revision,
+            freeze_backbone=self.config.train.freeze_backbone,
+            **hf_args,
         ).to(map_location)
