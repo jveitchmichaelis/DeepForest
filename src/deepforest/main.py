@@ -747,7 +747,9 @@ class deepforest(pl.LightningModule):
 
         # Log loss
         for key, value in loss_dict.items():
-            self.log(f"train_{key}", value, on_epoch=True, batch_size=len(images))
+            self.log(
+                f"train_{key}", value.detach(), on_epoch=True, batch_size=len(images)
+            )
 
         # Log sum of losses
         self.log("train_loss", losses, on_epoch=True, batch_size=len(images))
@@ -770,9 +772,11 @@ class deepforest(pl.LightningModule):
         # Log losses
         try:
             for key, value in loss_dict.items():
-                self.log(f"val_{key}", value, on_epoch=True, batch_size=len(images))
+                self.log(
+                    f"val_{key}", value.detach(), on_epoch=True, batch_size=len(images)
+                )
 
-            self.log("val_loss", losses, on_epoch=True, batch_size=len(images))
+            self.log("val_loss", losses.detach(), on_epoch=True, batch_size=len(images))
         except MisconfigurationException:
             pass
 
@@ -802,11 +806,12 @@ class deepforest(pl.LightningModule):
             self.last_preds.append(formatted_result)
 
         # Force cleanup
+        if len(targets) > 0:
+            del filtered_preds
+            del filtered_targets
         del preds
-        del filtered_preds
         del images
         del targets
-        del filtered_targets
 
         return losses
 
@@ -912,6 +917,9 @@ class deepforest(pl.LightningModule):
                 self.log("empty_frame_accuracy", empty_accuracy)
             except MisconfigurationException:
                 pass
+
+            self.empty_frame_accuracy.reset()
+            log_info("Logged empty frame accuracy")
 
     def on_validation_epoch_end(self):
         """Compute metrics at the end of the validation epoch."""
