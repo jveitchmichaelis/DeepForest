@@ -167,7 +167,7 @@ def train(
         accelerator=config.accelerator,
         precision=config.training_precision,
         strategy="ddp_find_unused_parameters_true"
-        if torch.cuda.is_available()
+        if torch.cuda.is_available() and "dino" in config.model.name.lower()
         else "auto",
     )
 

@@ -12,7 +12,7 @@ import torch
 from lightning_fabric.utilities.exceptions import MisconfigurationException
 from omegaconf import DictConfig
 from PIL import Image
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, TQDMProgressBar
 from torch import optim
 from torchmetrics.classification import BinaryAccuracy
 from torchmetrics.detection import IntersectionOverUnion, MeanAveragePrecision
@@ -302,6 +302,9 @@ class deepforest(pl.LightningModule):
 
         if self.config.accelerator == "cuda" and not torch.cuda.is_available():
             self.config.accelerator = "auto"
+
+        # Force TQDM progress bar
+        callbacks.append(TQDMProgressBar(refresh_rate=1))
 
         trainer_args = {
             "logger": logger,
@@ -732,6 +735,11 @@ class deepforest(pl.LightningModule):
 
         return formatted_results
 
+    def on_train_epoch_start(self):
+        log_info(
+            f"Starting training epoch {self.current_epoch + 1}/{self.trainer.max_epochs}"
+        )
+
     def training_step(self, batch, batch_idx):
         """Train on a loaded dataset."""
         # Confirm model is in train mode
@@ -754,6 +762,19 @@ class deepforest(pl.LightningModule):
         self.log("train_loss", losses, on_epoch=True, batch_size=len(images))
 
         return losses
+
+    def on_train_epoch_end(self):
+        """Log end of training epoch."""
+        metrics = self.trainer.logged_metrics
+        train_loss = metrics.get("train_loss", None)
+        if train_loss is not None:
+            log_info(
+                f"Completed training epoch {self.current_epoch + 1}/{self.trainer.max_epochs} - train_loss: {train_loss:.4f}"
+            )
+        else:
+            log_info(
+                f"Completed training epoch {self.current_epoch + 1}/{self.trainer.max_epochs}"
+            )
 
     def validation_step(self, batch, batch_idx):
         """Evaluate a batch."""
