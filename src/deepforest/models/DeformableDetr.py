@@ -7,13 +7,9 @@ from torchvision.ops import nms
 from transformers import (
     DeformableDetrForObjectDetection,
     DeformableDetrImageProcessor,
-    logging,
 )
 
 from deepforest.model import BaseModel
-
-# Suppress huge amounts of unnecessary warnings from transformers.
-logging.set_verbosity_error()
 
 
 class DeformableDetrWrapper(nn.Module):
@@ -34,10 +30,13 @@ class DeformableDetrWrapper(nn.Module):
         self.use_nms = use_nms
         self.freeze_backbone = freeze_backbone
 
-        # This suppresses a bunch of messages which are specific to DETR,
-        # but do not impact model function.
+        # Suppress PyTorch's non-meta parameter warnings during checkpoint loading
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message=".*copying from a non-meta parameter.*",
+                category=UserWarning,
+            )
 
             # If the user passed in a different number of classes to the model,
             # then the model will be modified on load. So we ignore
