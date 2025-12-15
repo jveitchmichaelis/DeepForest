@@ -1007,6 +1007,7 @@ class deepforest(pl.LightningModule):
                         for n, p in self.model.named_parameters()
                         if "backbone" not in n and p.requires_grad
                     ],
+                    "lr": self.config.train.lr,
                     "name": "head",
                 },
                 {
@@ -1025,12 +1026,14 @@ class deepforest(pl.LightningModule):
         if self.config.train.optimizer.lower() == "sgd":
             optimizer = optim.SGD(
                 params,
+                lr=self.config.train.lr,
                 momentum=0.9,
                 weight_decay=self.config.train.weight_decay,
             )
         elif self.config.train.optimizer.lower() == "adamw":
             optimizer = optim.AdamW(
                 params,
+                lr=self.config.train.lr,
                 weight_decay=self.config.train.weight_decay,
             )
         else:
