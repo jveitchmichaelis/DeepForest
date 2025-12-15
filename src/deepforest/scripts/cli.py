@@ -64,7 +64,11 @@ def train(
         else:
             torch.cuda.memory._record_memory_history()
 
-    if "ckpt" in config.model.name and os.path.exists(config.model.name):
+    if (
+        config.model.name is not None
+        and "ckpt" in config.model.name
+        and os.path.exists(config.model.name)
+    ):
         m = deepforest.load_from_checkpoint(
             config.model.name, map_location=config.accelerator, weights_only=False
         )
