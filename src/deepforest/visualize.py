@@ -272,13 +272,13 @@ def label_to_color(label: int) -> tuple:
     """Return an RGB color tuple for a given (integer) label."""
     color_dict = {}
 
-    random.seed(1)
+    color_random = random.Random(1)
     colors = [
         list((matplotlib.colors.hsv_to_rgb([x, 1.0, 1.0]) * 255).astype(int))
         for x in np.arange(0, 1, 1 / 80)
     ]
     colors = [tuple([int(y) for y in x]) for x in colors]
-    random.shuffle(colors)
+    color_random.shuffle(colors)
 
     for index, color in enumerate(colors):
         color_dict[index] = color
