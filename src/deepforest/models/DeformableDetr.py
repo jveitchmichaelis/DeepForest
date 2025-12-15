@@ -175,7 +175,9 @@ class DeformableDetrWrapper(nn.Module):
                 encoded_inputs[k] = v.to(self.net.device)
 
         if isinstance(encoded_inputs.get("labels"), list):
-            [target.to(self.net.device) for target in encoded_inputs["labels"]]
+            encoded_inputs["labels"] = [
+                target.to(self.net.device) for target in encoded_inputs["labels"]
+            ]
 
         preds = self.net(**encoded_inputs)
 
