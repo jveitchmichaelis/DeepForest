@@ -13,7 +13,6 @@ from lightning_fabric.utilities.exceptions import MisconfigurationException
 from omegaconf import DictConfig
 from PIL import Image
 from pytorch_lightning.callbacks import LearningRateMonitor
-from pytorch_lightning.utilities import rank_zero_only
 from torch import optim
 from torchmetrics.classification import BinaryAccuracy
 from torchmetrics.detection import IntersectionOverUnion, MeanAveragePrecision
@@ -40,9 +39,9 @@ def setup_logging(level=logging.INFO):
 setup_logging()
 
 
-@rank_zero_only
 def log_info(msg):
-    logging.getLogger("lightning.pytorch").info(msg)
+    rank = int(os.environ.get("LOCAL_RANK", 0))
+    logging.getLogger("lightning.pytorch").info(f"[Rank {rank}] {msg}")
 
 
 class deepforest(pl.LightningModule):
