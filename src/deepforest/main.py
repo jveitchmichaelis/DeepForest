@@ -951,10 +951,16 @@ class deepforest(pl.LightningModule):
         self.log_epoch_metrics()
         log_info(f"Logged epoch {self.current_epoch} metrics")
 
+        # Concatenate predictions if any exist
         if len(self.predictions) > 0:
-            return pd.concat(self.predictions)
+            result = pd.concat(self.predictions)
         else:
-            return pd.DataFrame()
+            result = pd.DataFrame()
+
+        # Clear predictions list to free memory
+        self.predictions.clear()
+
+        return result
 
     def predict_step(self, batch, batch_idx):
         """Predict a batch of images with the deepforest model. If batch is a
