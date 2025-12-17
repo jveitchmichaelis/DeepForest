@@ -18,10 +18,9 @@ _SUPPORTED_TRANSFORMS = {
     "HorizontalFlip": (A.HorizontalFlip, {"p": 0.5}),
     "VerticalFlip": (A.VerticalFlip, {"p": 0.5}),
     "Downscale": (A.Downscale, {"scale_range": (0.25, 0.5), "p": 0.5}),
-    "RandomCrop": (A.RandomCrop, {"height": 200, "width": 200, "p": 0.5}),
-    "RandomSizedBBoxSafeCrop": (
-        A.RandomSizedBBoxSafeCrop,
-        {"height": 200, "width": 200, "p": 0.5},
+    "RandomResizedCrop": (
+        A.RandomResizedCrop,
+        {"size": 800, "scale": (0.75, 1.0), "ratio": (1, 1), "p": 1.0},
     ),
     "PadIfNeeded": (A.PadIfNeeded, {"min_height": 800, "min_width": 800, "p": 1.0}),
     "Rotate": (A.Rotate, {"limit": 15, "p": 0.5}),
