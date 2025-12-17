@@ -65,6 +65,7 @@ class TrainConfig:
     log_root: str = "logs"
     lr: float = 0.001
     lr_backbone: float = 0.001
+    gradient_clip: float = 0.1
     optimizer: str = "sgd"
     weight_decay: float = 0
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)

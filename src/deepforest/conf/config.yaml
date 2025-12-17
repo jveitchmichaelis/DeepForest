@@ -48,6 +48,7 @@ train:
     # Optimizer initial learning rate
     lr: 0.001
     lr_backbone: 0.001
+    gradient_clip: 0.1
     optimizer: sgd
     weight_decay: 0.1 # For AdamW
 

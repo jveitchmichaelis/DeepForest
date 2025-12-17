@@ -312,11 +312,13 @@ class deepforest(pl.LightningModule):
             "enable_checkpointing": enable_checkpointing,
             "devices": self.config.devices,
             "accelerator": self.config.accelerator,
+            "precision": self.config.training_precision,
             "fast_dev_run": self.config.train.fast_dev_run,
             "callbacks": callbacks,
             "limit_train_batches": self.config.limit_batches,
             "limit_val_batches": limit_val_batches,
             "num_sanity_val_steps": num_sanity_val_steps,
+            "gradient_clip_val": self.config.train.gradient_clip,
         }
         # Update with kwargs to allow them to override config
         trainer_args.update(kwargs)

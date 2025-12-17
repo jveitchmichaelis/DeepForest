@@ -167,9 +167,6 @@ def train(
     m.create_trainer(
         logger=loggers,
         callbacks=callbacks,
-        gradient_clip_val=0.5,
-        accelerator=config.accelerator,
-        precision=config.training_precision,
         strategy="ddp_find_unused_parameters_true"
         if torch.cuda.is_available() and "dino" in config.model.name.lower()
         else "auto",
