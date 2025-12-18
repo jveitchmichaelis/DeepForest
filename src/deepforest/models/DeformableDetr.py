@@ -163,7 +163,11 @@ class DeformableDetrWrapper(nn.Module):
             targets = self._prepare_targets(targets)
 
         encoded_inputs = self.processor.preprocess(
-            images=images, annotations=targets, return_tensors="pt", do_rescale=False
+            images=images,
+            annotations=targets,
+            return_tensors="pt",
+            do_rescale=False,
+            do_resize=False,
         )
 
         # Tensor "movement" is not automatic here, this
