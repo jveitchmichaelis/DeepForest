@@ -175,12 +175,6 @@ class EvaluationCallback(Callback):
 
         # Deduplicate rank_dirs
         unique_dirs = list(dict.fromkeys(rank_dirs))
-        if len(unique_dirs) < len(rank_dirs):
-            warnings.warn(
-                f"Detected {len(rank_dirs) - len(unique_dirs)} duplicate directories "
-                f"in rank_dirs. This may indicate a configuration issue.",
-                stacklevel=2,
-            )
 
         # discover shards
         shard_paths: list[Path] = []
