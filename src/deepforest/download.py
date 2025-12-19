@@ -17,7 +17,7 @@ import geopandas as gpd
 import shapely
 from PIL import Image
 from pyproj import CRS
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 Image.MAX_IMAGE_PIXELS = None
 

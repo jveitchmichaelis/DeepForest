@@ -10,7 +10,7 @@ import shapely
 import xmltodict
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from deepforest import _ROOT
 from deepforest.conf.schema import Config as StructuredConfig

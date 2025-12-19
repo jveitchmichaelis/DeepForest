@@ -6,7 +6,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from deepforest import IoU, utilities
 from deepforest.utilities import determine_geometry_type

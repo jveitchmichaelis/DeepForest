@@ -16,7 +16,7 @@ import pandas as pd
 import yaml
 from hydra import compose, initialize, initialize_config_dir
 from omegaconf import OmegaConf
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 try:
     import comet_ml
