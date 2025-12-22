@@ -99,7 +99,9 @@ def get_transform(
             aug_transform = _create_augmentation(aug_name, aug_params)
             transforms_list.append(aug_transform)
 
-        bbox_params = A.BboxParams(format="pascal_voc", label_fields=["category_ids"])
+        bbox_params = A.BboxParams(
+            format="pascal_voc", label_fields=["category_ids"], clip=True
+        )
 
     # Always add ToTensorV2 at the end
     transforms_list.append(ToTensorV2())
