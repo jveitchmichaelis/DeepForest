@@ -181,7 +181,7 @@ def train(
 
     train_success = False
     try:
-        m.trainer.fit(m, ckpt_path=resume)
+        m.trainer.fit(m, ckpt_path=resume, weights_only=False)
         train_success = True
     except Exception as e:
         warnings.warn(
@@ -476,6 +476,12 @@ def main():
         help="Compress prediction CSV files using gzip for better storage efficiency.",
         action="store_true",
     )
+    train_parser.add_argument(
+        "--resume",
+        help="Path to checkpoint file to resume training from.",
+        type=str,
+        default=None,
+    )
 
     # Predict subcommand
     predict_parser = subparsers.add_parser(
@@ -562,6 +568,7 @@ def main():
             tensorboard=args.tensorboard,
             trace=args.trace,
             compress=args.compress,
+            resume=args.resume,
         )
 
         sys.exit(0 if res else 1)
