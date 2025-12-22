@@ -168,10 +168,11 @@ def train(
         logger=loggers,
         callbacks=callbacks,
         strategy="ddp_find_unused_parameters_true"
-        if torch.cuda.is_available() and "dino" in config.model.name.lower()
+        if torch.cuda.is_available()
+        and config.model.name is not None
+        and "dino" in config.model.name.lower()
         else "auto",
     )
-
     # Add experiment ID to hyperparameters if available
     if experiment_id is not None:
         # Update the saved hyperparameters to include experiment ID
