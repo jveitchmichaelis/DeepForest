@@ -11,7 +11,7 @@ import pandas as pd
 import pytorch_lightning as pl
 import torch
 from lightning_fabric.utilities.exceptions import MisconfigurationException
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from pytorch_lightning.callbacks import LearningRateMonitor, TQDMProgressBar
 from torch import optim
@@ -137,7 +137,7 @@ class deepforest(pl.LightningModule):
         else:
             self.transforms = transforms
 
-        self.save_hyperparameters({"config": self.config})
+        self.save_hyperparameters({"config": OmegaConf.to_container(self.config)})
 
     def load_model(self, model_name=None, revision=None):
         """Loads a model that has already been pretrained for a specific task,
