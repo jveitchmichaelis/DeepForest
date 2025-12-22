@@ -122,6 +122,9 @@ class EvaluationCallback(Callback):
             df.to_csv(self.csv_file, index=False, header=(self.predictions_written == 0))
             self.predictions_written += len(df)
 
+        # Clean up reference to avoid retaining DataFrames
+        del batch_preds
+
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:

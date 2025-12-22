@@ -1,4 +1,5 @@
 # entry point for deepforest model
+import gc
 import importlib
 import logging
 import os
@@ -761,8 +762,9 @@ class deepforest(pl.LightningModule):
             )
 
         # Log sum of losses
-        self.log("train_loss", losses, on_epoch=True, batch_size=len(images))
+        self.log("train_loss", losses.detach(), on_epoch=True, batch_size=len(images))
 
+        # Do not detach here, as it's required for backprop
         return losses
 
     def on_train_epoch_end(self):
@@ -777,6 +779,15 @@ class deepforest(pl.LightningModule):
             log_info(
                 f"Completed training epoch {self.current_epoch + 1}/{self.trainer.max_epochs}"
             )
+
+        # Force garbage collection
+        gc.collect()
+
+        # Clear GPU memory cache (MPS or CUDA)
+        if str(self.device).startswith("mps"):
+            torch.mps.empty_cache()
+        elif torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def validation_step(self, batch, batch_idx):
         """Evaluate a batch."""
@@ -953,16 +964,9 @@ class deepforest(pl.LightningModule):
         self.log_epoch_metrics()
         log_info(f"Logged epoch {self.current_epoch} metrics")
 
-        # Concatenate predictions if any exist
-        if len(self.predictions) > 0:
-            result = pd.concat(self.predictions)
-        else:
-            result = pd.DataFrame()
-
         # Clear predictions list to free memory
-        self.predictions.clear()
-
-        return result
+        del self.predictions
+        self.predictions = []
 
     def predict_step(self, batch, batch_idx):
         """Predict a batch of images with the deepforest model. If batch is a
