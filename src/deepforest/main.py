@@ -335,8 +335,12 @@ class deepforest(pl.LightningModule):
             )
 
     def on_save_checkpoint(self, checkpoint):
+        log_info(f"[Rank {self.trainer.global_rank}] Starting checkpoint save")
         checkpoint["label_dict"] = self.label_dict
         checkpoint["numeric_to_label_dict"] = self.numeric_to_label_dict
+        log_info(
+            f"[Rank {self.trainer.global_rank}] Finished checkpoint metadata preparation"
+        )
 
     def on_load_checkpoint(self, checkpoint):
         try:
@@ -769,8 +773,8 @@ class deepforest(pl.LightningModule):
 
     def on_train_epoch_end(self):
         """Log end of training epoch."""
-        metrics = self.trainer.logged_metrics
-        train_loss = metrics.get("train_loss", None)
+        metrics = self.trainer.callback_metrics
+        train_loss = metrics.get("train_loss_epoch", metrics.get("train_loss", None))
         if train_loss is not None:
             log_info(
                 f"Completed training epoch {self.current_epoch + 1}/{self.trainer.max_epochs} - train_loss: {train_loss:.4f}"
@@ -788,6 +792,10 @@ class deepforest(pl.LightningModule):
             torch.mps.empty_cache()
         elif torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+        log_info(
+            f"Completed garbage collection for epoch {self.current_epoch + 1}/{self.trainer.max_epochs}"
+        )
 
     def validation_step(self, batch, batch_idx):
         """Evaluate a batch."""

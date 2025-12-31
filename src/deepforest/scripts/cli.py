@@ -64,17 +64,16 @@ def train(
         else:
             torch.cuda.memory._record_memory_history()
 
-    if (
-        config.model.name is not None
-        and "ckpt" in config.model.name
-        and os.path.exists(config.model.name)
-    ):
+    # Load model from checkpoint or create new model
+    checkpoint_path = None
+    if config.model.name is not None and os.path.exists(config.model.name):
+        checkpoint_path = config.model.name
+        # Use cpu for loading if accelerator is auto, otherwise use specified accelerator
+        map_location = "cpu" if config.accelerator == "auto" else config.accelerator
         m = deepforest.load_from_checkpoint(
-            config.model.name, map_location=config.accelerator, weights_only=False
+            checkpoint_path, map_location=map_location, weights_only=False
         )
-
-        # Update config with user-provided, and ensure
-        # we overwrite on disk too
+        # Update config with user-provided, and ensure we overwrite on disk too
         m.config = OmegaConf.merge(m.config, config)
         m.save_hyperparameters({"config": m.config})
     else:
@@ -93,21 +92,51 @@ def train(
     # Store as %YYYY%mm%ddT%HH:%MM:%SS
     version = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Comet setup requires an external dependency
+    # Extract experiment_id for Comet experiment continuation
+    if resume is not None and os.path.exists(resume):
+        # Resuming from a checkpoint - need to peek at the checkpoint file
+        # since the model may have been loaded from a different source
+        try:
+            resume_ckpt = torch.load(resume, map_location="cpu", weights_only=False)
+            if (
+                "hyper_parameters" in resume_ckpt
+                and "experiment_id" in resume_ckpt["hyper_parameters"]
+            ):
+                experiment_id = resume_ckpt["hyper_parameters"]["experiment_id"]
+                print(f"Resuming training with experiment_id: {experiment_id}")
+        except Exception as e:
+            warnings.warn(
+                f"Failed to extract experiment_id from resume checkpoint: {e}",
+                stacklevel=2,
+            )
+    elif (
+        checkpoint_path is not None
+        and hasattr(m, "hparams")
+        and "experiment_id" in m.hparams
+    ):
+        # Model was loaded from a checkpoint - experiment_id already in hparams
+        experiment_id = m.hparams.experiment_id
+        print(f"Continuing experiment_id from checkpoint: {experiment_id}")
+
     if comet and not m.config.train.fast_dev_run:
         try:
+            # Comet setup requires an external dependency
             from pytorch_lightning.loggers import CometLogger
 
             comet_logger = CometLogger(
                 api_key=os.environ.get("COMET_API_KEY"),
                 workspace=os.environ.get("COMET_WORKSPACE"),
                 project=os.environ.get("COMET_PROJECT", default="DeepForest"),
+                experiment_key=experiment_id,
                 offline_directory=config.train.log_root,
             )
 
+            # Get experiment_id if we aren't resuming
+            if experiment_id is None:
+                experiment_id = comet_logger.experiment.get_key()
+
+            # Comet will set the experiment name for us
             experiment_name = comet_logger.experiment.get_name()
-            # Store experiment ID (key) for later re-logging to comet
-            experiment_id = comet_logger.experiment.get_key()
             version = ""
             loggers.append(comet_logger)
         except ImportError:
@@ -159,6 +188,7 @@ def train(
             mode="min",
             save_top_k=1,
             save_last=True,
+            save_on_train_epoch_end=True,
         )
         # Using equals causes a lot of strife with Hydra, so use colon instead.
         checkpoint_callback.CHECKPOINT_EQUALS_CHAR = ":"
@@ -239,9 +269,11 @@ def predict(
         None
     """
 
-    if "ckpt" in config.model.name and os.path.exists(config.model.name):
+    if config.model.name is not None and os.path.exists(config.model.name):
+        # Use cpu for loading if accelerator is auto, otherwise use specified accelerator
+        map_location = "cpu" if config.accelerator == "auto" else config.accelerator
         m = deepforest.load_from_checkpoint(
-            config.model.name, map_location=config.accelerator, weights_only=False
+            config.model.name, map_location=map_location, weights_only=False
         )
 
         # Update config with user-provided, and ensure
@@ -320,9 +352,11 @@ def evaluate(
     Returns:
         None
     """
-    if "ckpt" in config.model.name and os.path.exists(config.model.name):
+    if config.model.name is not None and os.path.exists(config.model.name):
+        # Use cpu for loading if accelerator is auto, otherwise use specified accelerator
+        map_location = "cpu" if config.accelerator == "auto" else config.accelerator
         m = deepforest.load_from_checkpoint(
-            config.model.name, map_location=config.accelerator
+            config.model.name, map_location=map_location, weights_only=False
         )
 
         # Update config with user-provided, and ensure
