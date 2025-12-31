@@ -79,15 +79,15 @@ class TrainConfig:
 
 @dataclass
 class ValidationConfig:
-    """Main validation configuration. As with training data, it's required that
-    you set a CSV file and root directory.
+    """Main validation configuration. Validation during training is important
+    to identify if the model has converged or is overfitting.
 
-    Validation during training is important to identify if the model has
-    converged or is overfitting.
+    csv_file and root_dir are optional. If not provided, training
+    proceeds without validation.
     """
 
-    csv_file: str | None = MISSING
-    root_dir: str | None = MISSING
+    csv_file: str | None = None
+    root_dir: str | None = None
     preload_images: bool = False
     size: int | None = None
     iou_threshold: float = 0.4
