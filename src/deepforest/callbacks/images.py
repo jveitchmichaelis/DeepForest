@@ -273,6 +273,7 @@ class ImagesCallback(Callback):
                     "image_name": os.path.basename(image),
                     "context": tag,
                     "step": trainer.global_step,
+                    "image_shape": img.shape,
                 }
 
                 if metadata:
