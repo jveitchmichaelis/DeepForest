@@ -499,7 +499,7 @@ def read_file(input, root_dir=None, image_path=None, label=None):
 
     # read file
     if isinstance(input, str):
-        if input.endswith(".csv"):
+        if input.endswith(".csv") or input.endswith(".csv.gz"):
             df = pd.read_csv(input)
         elif input.endswith(".json"):
             df = read_coco(input)
@@ -509,7 +509,7 @@ def read_file(input, root_dir=None, image_path=None, label=None):
             df = read_pascal_voc(input)
         else:
             raise ValueError(
-                f"File type {df} not supported. "
+                f"File type {input} not supported. "
                 "DeepForest currently supports .csv, .shp, .gpkg, .xml, and .json files. "
                 "See https://deepforest.readthedocs.io/en/latest/annotation.html "
             )
