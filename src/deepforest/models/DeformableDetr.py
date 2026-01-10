@@ -59,7 +59,8 @@ class DeformableDetrWrapper(nn.Module):
                     "This is expected if you plan to fine-tune this model on your own data.",
                     stacklevel=2,
                 )
-                self.net.config.label2id = self.config.label_dict
+                # Convert DictConfig to regular dict for JSON serialization
+                self.net.config.label2id = dict(self.config.label_dict)
                 self.net.config.id2label = {
                     v: k for k, v in self.config.label_dict.items()
                 }
