@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from omegaconf import MISSING
+from omegaconf import DictConfig, OmegaConf
 
 
 @dataclass
@@ -60,8 +60,8 @@ class TrainConfig:
     sanity checking.
     """
 
-    csv_file: str | None = MISSING
-    root_dir: str | None = MISSING
+    csv_file: str | None = None
+    root_dir: str | None = None
     log_root: str = "logs"
     lr: float = 0.001
     lr_backbone: float = 0.001
@@ -132,19 +132,19 @@ class Config:
     architecture: str = "retinanet"
     backbone: str = "resnet50"
     num_classes: int = 1
-    label_dict: dict[str, int] = field(default_factory=lambda: {"Tree": 0})
+    label_dict: DictConfig = field(default_factory=lambda: OmegaConf.create({"Tree": 0}))
 
     nms_thresh: float = 0.05
     score_thresh: float = 0.1
     model: ModelConfig = field(default_factory=ModelConfig)
 
     # Preprocessing
-    path_to_raster: str | None = MISSING
+    path_to_raster: str | None = None
     patch_size: int = 400
     patch_overlap: float = 0.05
-    annotations_xml: str | None = MISSING
-    rgb_dir: str | None = MISSING
-    path_to_rgb: str | None = MISSING
+    annotations_xml: str | None = None
+    rgb_dir: str | None = None
+    path_to_rgb: str | None = None
 
     train: TrainConfig = field(default_factory=TrainConfig)
     validation: ValidationConfig = field(default_factory=ValidationConfig)
