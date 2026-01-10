@@ -160,7 +160,7 @@ def test_get_available_augmentations():
     assert isinstance(augs, list)
     assert "HorizontalFlip" in augs
     assert "Downscale" in augs
-    assert "RandomSizedBBoxSafeCrop" in augs
+    assert "RandomResizedCrop" in augs
     assert "PadIfNeeded" in augs
 
 

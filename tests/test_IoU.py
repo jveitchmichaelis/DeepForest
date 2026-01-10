@@ -342,7 +342,7 @@ def test_threshold_sensitivity():
 
     # High threshold: should not be a match
     assert results_high['box_recall'] == 0.0
-    assert results_high['box_precision'] == 0.0
+    assert np.isnan(results_high['box_precision'])
 
 
 def test_large_coordinates():
