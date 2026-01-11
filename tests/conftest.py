@@ -58,11 +58,12 @@ def ROOT():
 
 
 @pytest.fixture(scope="session")
-def two_class_m():
+def two_class_m(tmp_path_factory):
     m = main.deepforest(num_classes=2, label_dict={"Alive": 0, "Dead": 1})
     m.config.train.csv_file = get_data("testfile_multi.csv")
     m.config.train.root_dir = os.path.dirname(get_data("testfile_multi.csv"))
     m.config.train.fast_dev_run = True
+    m.config.train.log_root = str(tmp_path_factory.mktemp("logs"))
     m.config.batch_size = 2
     m.config.validation.csv_file = get_data("testfile_multi.csv")
     m.config.validation.root_dir = os.path.dirname(get_data("testfile_multi.csv"))
@@ -74,11 +75,12 @@ def two_class_m():
 
 
 @pytest.fixture(scope="session")
-def m(download_release):
+def m(download_release, tmp_path_factory):
     m = main.deepforest()
     m.config.train.csv_file = get_data("example.csv")
     m.config.train.root_dir = os.path.dirname(get_data("example.csv"))
     m.config.train.fast_dev_run = True
+    m.config.train.log_root = str(tmp_path_factory.mktemp("logs"))
     m.config.batch_size = 2
     m.config.validation.csv_file = get_data("example.csv")
     m.config.validation.root_dir = os.path.dirname(get_data("example.csv"))

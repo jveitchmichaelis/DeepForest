@@ -5,8 +5,9 @@ import numpy as np
 import pytest
 import torch
 from PIL import Image
+from transformers import DeformableDetrForObjectDetection, DeformableDetrImageProcessor
 
-from deepforest import get_data, utilities
+from deepforest import get_data, main, utilities
 from deepforest.datasets.training import BoxDataset
 from deepforest.IoU import compute_IoU
 from deepforest.models import DeformableDetr
