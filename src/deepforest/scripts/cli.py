@@ -36,6 +36,17 @@ def train(
     the experiment ID is automatically captured and stored in the model's
     hyperparameters for later use.
 
+    Training Workflows:
+        1. Train from scratch: Set model.name=None in config (default)
+        2. Fine-tune: Set model.name=<path_to_hf_weights_or_repo> in config to load pretrained
+           weights and train on new data with fresh optimizer state
+        3. Resume training: Use --resume <path_to_checkpoint.ckpt> to continue training
+           from a checkpoint with optimizer/scheduler state intact
+
+    After Training:
+        - "Best" model is saved as HuggingFace weights in <log_dir>/hf_weights/
+        - Best and last checkpoints are saved to <log_dir>/checkpoints/*.ckpt
+
     Args:
         config (DictConfig): Hydra configuration containing model and training parameters
         checkpoint (bool, optional): Whether to enable model checkpointing. Defaults to True.
@@ -48,6 +59,9 @@ def train(
             Only works when CUDA is available. Defaults to False.
         compress (bool, optional): Whether to compress prediction CSV files using gzip for
             better storage efficiency. Defaults to False.
+        resume (str, optional): Path to checkpoint file to resume training from. Preserves
+            optimizer state and training progress. For fine-tuning with new data, use
+            model.name in config instead. Defaults to None.
 
     Returns:
         bool: True if training completed successfully, False if training failed
@@ -64,20 +78,29 @@ def train(
         else:
             torch.cuda.memory._record_memory_history()
 
-    # Load model from checkpoint or create new model
-    checkpoint_path = None
-    if config.model.name is not None and os.path.exists(config.model.name):
-        checkpoint_path = config.model.name
-        # Use cpu for loading if accelerator is auto, otherwise use specified accelerator
-        map_location = "cpu" if config.accelerator == "auto" else config.accelerator
-        m = deepforest.load_from_checkpoint(
-            checkpoint_path, map_location=map_location, weights_only=False
+    # Create model - either from scratch or with HF pretrained weights via config.model.name
+    m = deepforest(config=config)
+
+    # Validate resume checkpoint if provided
+    if resume is not None:
+        if not os.path.exists(resume):
+            raise FileNotFoundError(f"Resume checkpoint not found: {resume}")
+        m.print(f"Resuming training from checkpoint: {resume}")
+
+    # Warn if model.name looks like a checkpoint path. In this case the
+    # user should provide a path to either a repo, or a pretrained checkpoint
+    # directory (safetensors + config)
+    if (
+        config.model.name is not None
+        and os.path.exists(config.model.name)
+        and config.model.name.endswith(".ckpt")
+    ):
+        warnings.warn(
+            f"model.name points to a .ckpt file: {config.model.name}\n"
+            "For resuming training, use --resume flag instead.\n"
+            "model.name should point to HuggingFace weights directory.",
+            stacklevel=2,
         )
-        # Update config with user-provided, and ensure we overwrite on disk too
-        m.config = OmegaConf.merge(m.config, config)
-        m.save_hyperparameters({"config": m.config})
-    else:
-        m = deepforest(config=config)
 
     # Set matmul precision
     torch.set_float32_matmul_precision(config.matmul_precision)
@@ -109,14 +132,6 @@ def train(
                 f"Failed to extract experiment_id from resume checkpoint: {e}",
                 stacklevel=2,
             )
-    elif (
-        checkpoint_path is not None
-        and hasattr(m, "hparams")
-        and "experiment_id" in m.hparams
-    ):
-        # Model was loaded from a checkpoint - experiment_id already in hparams
-        experiment_id = m.hparams.experiment_id
-        print(f"Continuing experiment_id from checkpoint: {experiment_id}")
 
     if comet and not m.config.train.fast_dev_run:
         try:
@@ -226,6 +241,40 @@ def train(
             filename=Path(csv_logger.log_dir) / "dump_snapshot.pickle"
         )
 
+    # Save checkpoints
+    if train_success and checkpoint:
+        best_checkpoint = checkpoint_callback.best_model_path
+        if best_checkpoint and os.path.exists(best_checkpoint):
+            m.print(f"Saving HuggingFace weights from best checkpoint: {best_checkpoint}")
+            hf_weights_dir = Path(csv_logger.log_dir) / "hf_weights"
+
+            # Load best checkpoint and save as HF weights
+            best_model = deepforest.load_from_checkpoint(
+                best_checkpoint, map_location="cpu", weights_only=True
+            )
+            best_model.model.save_pretrained(hf_weights_dir)
+            m.print(f"HuggingFace weights saved to: {hf_weights_dir}")
+
+            # Print summary of saved artifacts
+            m.print("\nTraining artifacts saved:")
+            m.print(f"  - Best model (HF weights): {hf_weights_dir}")
+            m.print(f"  - Best checkpoint (.ckpt): {best_checkpoint}")
+            m.print(
+                f"  - Last checkpoint (.ckpt): {Path(checkpoint_callback.dirpath) / 'last.ckpt'}"
+            )
+            m.print("\nFor fine-tuning: use model.name={hf_weights_dir}")
+            m.print(
+                f"For resuming: use --resume {Path(checkpoint_callback.dirpath) / 'last.ckpt'}"
+            )
+
+            # Log to comet if enabled
+            if comet:
+                for logger in m.trainer.loggers:
+                    if hasattr(logger.experiment, "log_artifact"):
+                        logger.experiment.log_asset_folder(
+                            hf_weights_dir, log_file_name=True
+                        )
+
     # Upload predictions
     if comet:
         for logger in m.trainer.loggers:
@@ -269,18 +318,15 @@ def predict(
         None
     """
 
-    if config.model.name is not None and os.path.exists(config.model.name):
-        # Use cpu for loading if accelerator is auto, otherwise use specified accelerator
+    # For inference, check if model.name is a PyTorch Lightning checkpoint
+    if config.model.name is not None and config.model.name.endswith(".ckpt"):
+        # Load from checkpoint for inference
         map_location = "cpu" if config.accelerator == "auto" else config.accelerator
         m = deepforest.load_from_checkpoint(
-            config.model.name, map_location=map_location, weights_only=False
+            config.model.name, map_location=map_location, weights_only=True
         )
-
-        # Update config with user-provided, and ensure
-        # we overwrite on disk too
-        m.config = OmegaConf.merge(m.config, config)
-        m.save_hyperparameters({"config": m.config})
     else:
+        # Load from HF weights or create new model
         m = deepforest(config=config)
 
     m.create_trainer(logger=False)
@@ -352,18 +398,15 @@ def evaluate(
     Returns:
         None
     """
-    if config.model.name is not None and os.path.exists(config.model.name):
-        # Use cpu for loading if accelerator is auto, otherwise use specified accelerator
+    # For inference, check if model.name is a PyTorch Lightning checkpoint
+    if config.model.name is not None and config.model.name.endswith(".ckpt"):
+        # Load from checkpoint for inference
         map_location = "cpu" if config.accelerator == "auto" else config.accelerator
         m = deepforest.load_from_checkpoint(
-            config.model.name, map_location=map_location, weights_only=False
+            config.model.name, map_location=map_location, weights_only=True
         )
-
-        # Update config with user-provided, and ensure
-        # we overwrite on disk too
-        m.config = OmegaConf.merge(m.config, config)
-        m.save_hyperparameters({"config": m.config})
     else:
+        # Load from HF weights or create new model
         m = deepforest(config=config)
 
     m.create_trainer(logger=False)
@@ -485,8 +528,20 @@ def main():
     # Train subcommand
     train_parser = subparsers.add_parser(
         "train",
-        help="Train a model. It is strongly recommended that you enable either Tensorboard or Comet logging so you can track your experiment visually.",
-        epilog="Any remaining arguments <key>=<value> will be passed to Hydra to override the current config.",
+        help="Train a model. Use --resume to continue training, or set model.name in config to fine-tune from pretrained weights.",
+        epilog="""
+Examples:
+  # Train from scratch
+  deepforest train
+
+  # Fine-tune from HuggingFace weights
+  deepforest train model.name=/path/to/hf_weights
+
+  # Resume interrupted training
+  deepforest train --resume /path/to/checkpoint.ckpt
+
+Any remaining arguments <key>=<value> will be passed to Hydra to override the current config.
+        """,
     )
     train_parser.add_argument(
         "--disable-checkpoint", help="Path to log folder", action="store_true"
@@ -513,7 +568,8 @@ def main():
     )
     train_parser.add_argument(
         "--resume",
-        help="Path to checkpoint file to resume training from.",
+        help="Resume training from a PyTorch Lightning checkpoint (.ckpt file). "
+        "For fine-tuning with new data, use model.name in config instead.",
         type=str,
         default=None,
     )
