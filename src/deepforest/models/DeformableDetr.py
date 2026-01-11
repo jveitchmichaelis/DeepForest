@@ -14,7 +14,12 @@ from deepforest.model import BaseModel
 
 class DeformableDetrWrapper(nn.Module):
     """This class wraps a transformers DeformableDetrForObjectDetection model
-    so that input pre- and post-processing happens transparently."""
+    so that input pre- and post-processing happens transparently.
+
+    The class exposes a save_pretrained method for saving both model and
+    processor, to allow pushing to HF Hub. However, you should use the
+    main constructor to load a model from pretrained weights.
+    """
 
     def __init__(
         self, config, name, revision, use_nms=True, freeze_backbone=False, **hf_args
@@ -73,6 +78,12 @@ class DeformableDetrWrapper(nn.Module):
             if self.freeze_backbone:
                 for param in self.net.model.backbone.conv_encoder.model.parameters():
                     param.requires_grad = False
+
+    def save_pretrained(self, save_directory, push_to_hub=False, **kwargs):
+        """Save model/config and processor to a directory."""
+        self.net.save_pretrained(save_directory, push_to_hub=push_to_hub, **kwargs)
+        self.net.config.save_pretrained(save_directory, push_to_hub=push_to_hub, **kwargs)
+        self.processor.save_pretrained(save_directory, push_to_hub=push_to_hub, **kwargs)
 
     def _prepare_targets(self, targets):
         """This is an internal function which translates BoxDataset targets
