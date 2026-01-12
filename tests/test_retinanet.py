@@ -103,3 +103,33 @@ def test_maintain_parameters(config):
     x = [torch.rand(3, 300, 400), torch.rand(3, 500, 400)]
     predictions = retinanet_model(x)
     assert retinanet_model.score_thresh == 0.9
+
+def test_retinanet_from_pretrained(config):
+    model = retinanet.RetinaNetHub.from_pretrained(
+        "weecology/deepforest-tree",
+    )
+    assert model.num_classes == 1
+    assert model.label_dict == {"Tree": 0}
+
+def test_retinanet_class_override(config):
+    model = retinanet.RetinaNetHub.from_pretrained(
+        "weecology/deepforest-tree",
+        num_classes=2,
+        label_dict={"Tree": 0, "Shrub": 1}
+    )
+
+    # Check classification head was properly reinitialized
+    cls_head = model.head.classification_head
+    assert cls_head.num_classes == 2
+    # Verify the output layer has correct shape (num_classes * num_anchors)
+    assert cls_head.cls_logits.out_channels == 2 * cls_head.num_anchors
+    assert model.num_classes == 2
+    assert model.label_dict == {"Tree": 0, "Shrub": 1}
+
+def test_retinanet_bad_class_override(config):
+
+    with pytest.raises(ValueError, match="does not match"):
+        retinanet.RetinaNetHub.from_pretrained(
+            "weecology/deepforest-tree",
+            num_classes=4
+        )

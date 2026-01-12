@@ -165,10 +165,11 @@ def test_train_pretrain_finetune_cli(tmpdir, architecture):
     # 2. Pretrain phase with custom config
     pretrain_log_root = str(tmpdir / "pretrain_logs")
 
-    # Create pretrain config
+    # Create pretrain config on disk
     pretrain_config = OmegaConf.load(get_data("config.yaml"))
     pretrain_config.architecture = architecture
     pretrain_config.model.name = None
+    pretrain_config.label_dict = {"Tree": 0}
     pretrain_config.train.csv_file = test_labels
     pretrain_config.train.root_dir = root_dir
     pretrain_config.train.epochs = 1

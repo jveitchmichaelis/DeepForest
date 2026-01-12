@@ -10,10 +10,12 @@ from deepforest import get_data, main, utilities
 
 @pytest.fixture
 def config(architecture, tmpdir):
-    # Basic config for fast tests
+    # Basic from-scratch config for fast tests
     config = {
         "architecture": architecture,
         "model": {"name": None},
+        "num_classes": 1,
+        "label_dict": {"Tree": 0},
         "train": {
             "csv_file": get_data("OSBS_029.csv"),
             "root_dir": os.path.dirname(get_data("OSBS_029.csv")),
@@ -264,6 +266,8 @@ def test_load_from_checkpoint_with_config_dict(config):
             "batch_size": 8,
             "train": {"epochs": 20},
             "model": {"name": None},
+            "label_dict": config["label_dict"],
+            "num_classes": config["num_classes"],
         }
     )
 
@@ -277,6 +281,9 @@ def test_load_from_checkpoint_with_config_dict(config):
     assert loaded.config.train.epochs == 20
     # Verify architecture is preserved
     assert loaded.config.architecture == config["architecture"]
+    # Verify label_dict is preserved
+    assert loaded.label_dict == m.label_dict
+    assert loaded.numeric_to_label_dict == m.numeric_to_label_dict
 
 # This test requires "good' weights for tree detection
 @pytest.mark.parametrize("architecture", ["retinanet"])

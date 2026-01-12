@@ -182,22 +182,7 @@ class deepforest(pl.LightningModule):
             pretrained=model_name, revision=revision
         )
 
-        # Handle label override
-        cfg_labels = self.config.label_dict
-        model_labels = self.model.label_dict
-
-        # If user specified labels, and they differ from the model:
-        if cfg_labels != model_labels:
-            warnings.warn(
-                "Your supplied label dict differs from the model. "
-                "This is expected if you plan to fine-tune this model on your own data.",
-                stacklevel=2,
-            )
-            label_dict = cfg_labels
-        else:
-            label_dict = model_labels
-
-        self.set_labels(label_dict)
+        self.set_labels(self.model.label_dict)
 
         return
 
@@ -208,9 +193,11 @@ class deepforest(pl.LightningModule):
         Args:
             label_dict (dict): Dictionary mapping class names to numeric IDs.
         """
-        if label_dict is None:
+        if label_dict is None or not label_dict:
             raise ValueError(
-                "Label dictionary not found. Check it was set in your config file or config_args."
+                "Label dictionary not found. When training from scratch, you must "
+                "provide a label_dict in your config file or config_args. "
+                "When loading a pretrained model, labels should be loaded automatically."
             )
 
         # Label encoder and decoder
@@ -227,7 +214,7 @@ class deepforest(pl.LightningModule):
         if len(set(label_dict.values())) != len(label_dict):
             raise ValueError("Found duplicate label IDs in label_dict.")
 
-        self.label_dict = label_dict
+        self.label_dict = dict(label_dict)
         self.numeric_to_label_dict = {v: k for k, v in label_dict.items()}
 
     def use_release(self, check_release=True):

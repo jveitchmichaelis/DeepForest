@@ -132,7 +132,7 @@ class Config:
     architecture: str = "retinanet"
     backbone: str = "resnet50"
     num_classes: int = 1
-    label_dict: DictConfig = field(default_factory=lambda: OmegaConf.create({"Tree": 0}))
+    label_dict: DictConfig = field(default_factory=lambda: OmegaConf.create({}))
 
     nms_thresh: float = 0.05
     score_thresh: float = 0.1

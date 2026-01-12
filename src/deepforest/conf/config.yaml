@@ -27,8 +27,10 @@ model:
     name: 'weecology/deepforest-tree'
     revision: 'main'
 
+# Set the labels to override what's loaded from the model,
+# for example if you are fine-tuning on a new class
 label_dict:
-    Tree: 0
+
 
 # Pre-processing parameters
 path_to_raster:

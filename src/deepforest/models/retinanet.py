@@ -113,20 +113,23 @@ class RetinaNetHub(RetinaNet, PyTorchModelHubMixin):
 
         model = super().from_pretrained(pretrained_model_name_or_path, **kwargs)
 
-        # Override class info if specified
-        if num_classes is not None and label_dict is not None:
-            if num_classes != model.num_classes:
-                warnings.warn(
-                    f"The number of classes in your config differs "
-                    f"compared to the model checkpoint ({model.num_classes}-class)."
-                    f" If you are fine-tuning on a new dataset that "
-                    f"has {num_classes} then this is expected.",
-                    stacklevel=2,
-                )
+        # Check if we need to adjust the class head
+        if num_classes is not None and num_classes != model.num_classes:
+            model._adjust_classes(num_classes)
+            model.num_classes = num_classes
 
-                model._adjust_classes(num_classes)
-
+        # If label_dict is provided, use it; otherwise keep model's existing label_dict
+        if label_dict is not None and len(label_dict) > 0:
             model.label_dict = label_dict
+
+        # Sanity check
+        if len(model.label_dict) != model.num_classes:
+            raise ValueError(
+                f"Label dict length {len(model.label_dict or {})} does not match num_classes {model.num_classes}"
+            )
+
+        # Update config if anything changed
+        if num_classes is not None or label_dict is not None:
             model.update_config()
 
         return model
@@ -149,8 +152,8 @@ class RetinaNetHub(RetinaNet, PyTorchModelHubMixin):
         )
 
     def update_config(self):
-        # Stored as config on HF
-        self.config = {
+        # Defines what's saved to the config on the hub
+        self._hub_mixin_config = {
             "num_classes": self.num_classes,
             "nms_thresh": self.nms_thresh,
             "score_thresh": self.score_thresh,
@@ -238,6 +241,8 @@ class Model(BaseModel):
             model: a pytorch nn module
         """
 
+        label_dict = dict(self.config.label_dict) if self.config.label_dict else None
+
         if pretrained == "resnet50-imagenet":
             if revision is not None:
                 warnings.warn(
@@ -250,7 +255,7 @@ class Model(BaseModel):
                 num_classes=self.config.num_classes,
                 nms_thresh=self.config.nms_thresh,
                 score_thresh=self.config.score_thresh,
-                label_dict=self.config.label_dict,
+                label_dict=label_dict,
                 freeze_backbone=self.config.train.freeze_backbone,
             )
         elif pretrained == "resnet50-mscoco":
@@ -264,7 +269,7 @@ class Model(BaseModel):
                 num_classes=self.config.num_classes,
                 nms_thresh=self.config.nms_thresh,
                 score_thresh=self.config.score_thresh,
-                label_dict=self.config.label_dict,
+                label_dict=label_dict,
                 freeze_backbone=self.config.train.freeze_backbone,
             )
         elif pretrained is None:
@@ -279,7 +284,7 @@ class Model(BaseModel):
                 num_classes=self.config.num_classes,
                 nms_thresh=self.config.nms_thresh,
                 score_thresh=self.config.score_thresh,
-                label_dict=self.config.label_dict,
+                label_dict=label_dict,
                 freeze_backbone=self.config.train.freeze_backbone,
             )
         # Deepforest/tree, fine-tune from user, etc.
@@ -289,7 +294,7 @@ class Model(BaseModel):
                 revision=revision,
                 backbone=self.config.backbone,
                 num_classes=self.config.num_classes,
-                label_dict=self.config.label_dict,
+                label_dict=label_dict if label_dict else None,
                 nms_thresh=self.config.nms_thresh,
                 score_thresh=self.config.score_thresh,
                 freeze_backbone=self.config.train.freeze_backbone,

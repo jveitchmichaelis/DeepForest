@@ -57,8 +57,14 @@ class DeformableDetrWrapper(nn.Module):
                 name, revision=revision, **hf_args
             )
 
-            # If user-provided label_dict doesn't match the model's id2label:
-            if self.net.config.label2id != self.config.label_dict:
+            maybe_override_labels = (
+                self.config.label_dict is not None and len(self.config.label_dict) > 0
+            )
+
+            if (
+                maybe_override_labels
+                and self.net.config.label2id != self.config.label_dict
+            ):
                 warnings.warn(
                     "Your supplied label dict differs from the model."
                     "This is expected if you plan to fine-tune this model on your own data.",

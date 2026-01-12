@@ -78,7 +78,7 @@ def m(download_release, tmpdir):
 # A random-initialized model
 @pytest.fixture()
 def m_without_release(tmpdir):
-    m = main.deepforest(config_args={"model": {"name": None}})
+    m = main.deepforest(config_args={"model": {"name": None}, "label_dict": { "Tree": 0 }})
     m.config.train.csv_file = get_data("example.csv")
     m.config.train.root_dir = os.path.dirname(get_data("example.csv"))
     m.config.train.fast_dev_run = True
@@ -1055,3 +1055,47 @@ def test_set_labels_invalid_length(m): # Expect a ValueError when setting an inv
     invalid_mapping = {"Object": 0, "Extra": 1}
     with pytest.raises(ValueError):
         m.set_labels(invalid_mapping)
+
+
+def test_load_different_models_labels_change():
+    """Test that loading different models changes labels appropriately."""
+    # Load tree model
+    m_tree = main.deepforest(config_args={"model": {"name": "weecology/deepforest-tree"}})
+    assert m_tree.label_dict == {"Tree": 0}
+
+    # Load bird model - note this is a multi-class model
+    m_bird = main.deepforest(config_args={
+        "model": {"name": "weecology/deepforest-bird"},
+    })
+    assert m_bird.label_dict == {"Bird": 0}
+
+def test_load_model_label_override(tmpdir):
+    """Test that explicit label_dict in config overrides model labels."""
+    custom_labels = {"CustomTree": 0}
+
+    # Load tree model but override with custom labels
+    # Note: The warning should be emitted when labels differ
+    m = main.deepforest(config_args={
+        "model": {"name": "weecology/deepforest-tree"},
+        "label_dict": custom_labels
+    })
+
+    m.model.save_pretrained(tmpdir / "custom_model")
+    del m
+
+    m = main.deepforest(config_args={
+        "model": {"name": str(tmpdir / "custom_model")},
+    })
+
+    # Should use config labels, not model labels
+    assert m.label_dict == custom_labels
+    assert m.numeric_to_label_dict == {0: "CustomTree"}
+
+
+def test_load_from_scratch_without_labels_errors():
+    """Test that training from scratch without label_dict raises an error."""
+    with pytest.raises(ValueError, match="Label dictionary not found"):
+        main.deepforest(config_args={
+            "model": {"name": None},
+            "architecture": "retinanet"
+        })
