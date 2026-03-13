@@ -80,6 +80,7 @@ class TrainConfig:
     fast_dev_run: bool = False
     preload_images: bool = False
     augmentations: list[str] | None = field(default_factory=lambda: ["HorizontalFlip"])
+    limit_batches: float = 1.0
 
 
 @dataclass
@@ -96,9 +97,11 @@ class ValidationConfig:
     preload_images: bool = False
     size: int | None = None
     iou_threshold: float = 0.4
+    distance_threshold: float = 10.0
     val_accuracy_interval: int = 20
     lr_plateau_target: str = "val_loss"
     augmentations: list[str] | None = field(default_factory=lambda: [])
+    limit_batches: float = 1.0
 
 
 @dataclass
@@ -123,6 +126,22 @@ class CropModelConfig:
     resize_interpolation: str = "bilinear"
     normalize: Any = None
     expand: int = 0
+
+
+@dataclass
+class KeypointConfig:
+    """Configuration for keypoint (density-estimation) models such as
+    TreeFormer.
+
+    Parameters control the Gaussian density map generation and loss weighting.
+    ``density_sigma_start`` and ``density_sigma_end`` define a cosine annealing
+    schedule for the Gaussian sigma over training epochs.
+    """
+
+    density_sigma_start: float = 4.0
+    density_sigma_end: float = 2.0
+    mae_weight: float = 0.025
+    count_cls_weight: float = 0.025
 
 
 @dataclass
@@ -159,7 +178,7 @@ class Config:
     topk_candidates: int = 1000
     model: ModelConfig = field(default_factory=ModelConfig)
 
-    log_root: str = "./"
+    log_root: str = "./lightning_logs"
 
     # Preprocessing
     path_to_raster: str | None = None
@@ -173,3 +192,4 @@ class Config:
     validation: ValidationConfig = field(default_factory=ValidationConfig)
     predict: PredictConfig = field(default_factory=PredictConfig)
     cropmodel: CropModelConfig = field(default_factory=CropModelConfig)
+    keypoint: KeypointConfig = field(default_factory=KeypointConfig)
