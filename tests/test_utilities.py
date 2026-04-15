@@ -726,10 +726,9 @@ def test_format_geometry_point():
         "scores": torch.tensor([0.9, 0.8])
     }
 
-    # Format geometry should raise ValueError since point predictions are not supported
-    with pytest.raises(ValueError, match="Point predictions are not yet supported for formatting"):
-        utilities.format_geometry(prediction, geom_type="point")
-
+    df = utilities.format_geometry(prediction, geom_type="point")
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) == 2
 
 def test_format_geometry_polygon():
     """Test formatting polygon predictions"""

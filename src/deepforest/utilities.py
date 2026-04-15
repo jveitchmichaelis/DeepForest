@@ -377,14 +377,37 @@ def format_geometry(predictions, scores=True, geom_type=None):
 
     if geom_type == "box":
         df = format_boxes(predictions, scores=scores)
-        if df is None:
-            return None
-
     elif geom_type == "polygon":
         raise ValueError("Polygon predictions are not yet supported for formatting")
     elif geom_type == "point":
-        raise ValueError("Point predictions are not yet supported for formatting")
+        df = format_keypoints(predictions, scores=scores)
 
+    return df
+
+
+def format_keypoints(prediction, scores=True):
+    """Format a retinanet prediction into a pandas dataframe for a single
+    image.
+
+    Args:
+        prediction: a dictionary with keys 'boxes' and 'labels' coming from a retinanet
+        scores: Whether boxes come with scores, during prediction, or without scores, as in during training.
+    Returns:
+        df: a pandas dataframe
+    """
+    if len(prediction["points"]) == 0:
+        return None
+
+    df = pd.DataFrame(
+        prediction["points"].cpu().detach().numpy(),
+        columns=["x", "y"],
+    )
+    df["label"] = prediction["labels"].cpu().detach().numpy()
+
+    if scores:
+        df["score"] = prediction["scores"].cpu().detach().numpy()
+
+    df["geometry"] = df.apply(lambda x: shapely.geometry.Point(x.x, x.y), axis=1)
     return df
 
 
@@ -481,11 +504,8 @@ def __pandas_to_geodataframe__(df: pd.DataFrame):
         elif geom_type == "polygon":
             df["geometry"] = gpd.GeoSeries.from_wkt(df["polygon"])
         elif geom_type == "point":
-            df["geometry"] = gpd.GeoSeries(
-                [
-                    shapely.geometry.Point(x, y)
-                    for x, y in zip(df.x.astype(float), df.y.astype(float), strict=False)
-                ]
+            df["geometry"] = shapely.points(
+                df.x.to_numpy(dtype=float), df.y.to_numpy(dtype=float)
             )
     gdf = gpd.GeoDataFrame(df, geometry="geometry")
     gdf = DeepForest_DataFrame(gdf)
