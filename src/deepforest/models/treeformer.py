@@ -218,10 +218,10 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         score_sum = score_map.view(B, -1).sum(1).view(B, 1, 1, 1)
         normed = score_map / (score_sum + 1e-4)
         if self.enforce_count:
-            # Keep the count path sign-sensitive. A small positive CLS-head bias
-            # seeds the model on the correct side of zero, while the floor avoids
-            # a zero-mass density map if the raw count briefly crosses zero.
-            count = cls_count.view(B, 1, 1, 1).clamp(min=1e-4)
+            # abs() recovers valid magnitude when the CLS head goes slightly
+            # negative on sparse images; clamp floors at 1e-4 to avoid
+            # zero-mass density maps.
+            count = cls_count.view(B, 1, 1, 1).abs().clamp(min=1e-4)
             return normed * count, normed
         return score_map, normed
 

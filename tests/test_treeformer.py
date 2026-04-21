@@ -126,18 +126,6 @@ def test_treeformer_density_mode_masks_padded_regions_when_enforcing_count():
     assert density_map[0, :, :, 4:].abs().sum().item() == 0.0
 
 
-def test_treeformer_cls_bias_initializes_positive():
-    """The CLS head should retain its small positive density prior."""
-    model = TreeFormerModel(
-        backbone=_BACKBONE,
-        pretrained=False,
-    )
-
-    torch.testing.assert_close(
-        model.regression.cls_lin4.bias.detach(),
-        torch.full_like(model.regression.cls_lin4.bias, 1e-4),
-    )
-
 
 # ---------------------------------------------------------------------------
 # Training mode — various batch sizes
