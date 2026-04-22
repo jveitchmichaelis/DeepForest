@@ -141,6 +141,7 @@ def main():
             plot=args.plot,
             root_dir=args.root_dir,
             mode=args.mode,
+            nodata=args.nodata,
         )
     elif args.command == "train":
         res = train(
