@@ -68,6 +68,7 @@ keypoint:
     count_cls_weight: 0.1
     ot_weight: 0.1
     density_l1_weight: 0.01
+    density_l1_dist_weight: false
     sinkhorn_reg: 1.0
     num_of_iter_in_ot: 100
     score_integration_radius: 2

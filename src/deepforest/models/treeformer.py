@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from huggingface_hub import PyTorchModelHubMixin
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import distance_transform_edt, gaussian_filter
 from transformers import AutoConfig, AutoImageProcessor, PvtV2Config, PvtV2Model
 
 from deepforest.losses.ot_loss import OT_Loss
@@ -58,6 +58,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         mae_weight: float = 1.0,
         ot_weight: float = 0.1,
         density_l1_weight: float = 0.01,
+        density_l1_dist_weight: bool = False,
         count_cls_weight: float = 1.0,
         losses: list | None = None,
         norm_cood: bool = False,
@@ -127,6 +128,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         self.mae_weight = mae_weight
         self.ot_weight = ot_weight
         self.density_l1_weight = density_l1_weight
+        self.density_l1_dist_weight = density_l1_dist_weight
         self.count_cls_weight = count_cls_weight
         self.enforce_count = enforce_count
         self.norm_cood = norm_cood
@@ -166,6 +168,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
             "mae_weight": self.mae_weight,
             "ot_weight": self.ot_weight,
             "density_l1_weight": self.density_l1_weight,
+            "density_l1_dist_weight": self.density_l1_dist_weight,
             "count_cls_weight": self.count_cls_weight,
             "losses": self.losses,
             "norm_cood": self.norm_cood,
@@ -368,31 +371,53 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         return discrete_map
 
     # TODO: Refactor this as points_to_density and use for dataset as well.
-    def _make_gt_density(self, points: list, out_h: int, out_w: int) -> torch.Tensor:
-        """Build a batched Gaussian density map (B, 1, out_h, out_w) from point
-        lists.
+    def _make_gt_density(
+        self, points: list, out_h: int, out_w: int
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Build a batched Gaussian density map (B, 1, H, W) from point lists,
+        and optionally a distance-weight map of the same shape.
 
-        Points are expected in output-map coordinates. A Gaussian is
-        applied with sigma rescaled from full-image pixels into output-
-        map pixels, then count-normalized so each map sums to the number
-        of ground-truth points.
+        The distance weight at each pixel is ``1 + d / d_mean`` where ``d`` is
+        the Euclidean distance to the nearest GT point.  This gives baseline
+        weight 1 at GT locations and amplifies the density_l1 gradient for
+        pixels far from any annotation — creating an attractive well that pulls
+        diffuse predictions toward GT point locations.
 
-        This differs from the original TreeFormer training pipeline,
-        which supervises the TV/L1 term with a downsampled discrete
-        point map rather than a Gaussian-smoothed density target.
+        Returns:
+            gt_density:     (B, 1, H, W) Gaussian density map.
+            dist_weights:   (B, 1, H, W) distance weights, or None if
+                            ``density_l1_dist_weight`` is False.
         """
         sigma = self.density_sigma
         maps = []
+        dist_maps = [] if self.density_l1_dist_weight else None
         for _idx, p in enumerate(points):
             p_np = p.cpu().numpy()
             discrete = self.rasterize_points(out_h, out_w, p_np)
             if discrete.sum() > 0:
                 smoothed = gaussian_filter(discrete, sigma=sigma)
-                smoothed = smoothed * (discrete.sum() / smoothed.sum())  # count-normalize
+                smoothed = smoothed * (discrete.sum() / smoothed.sum())
             else:
                 smoothed = discrete
             maps.append(smoothed)
-        return torch.from_numpy(np.stack(maps)).unsqueeze(1).float().to(self.device)
+            if dist_maps is not None:
+                # Distance to nearest GT point for each output-map pixel.
+                gt_mask = discrete > 0
+                if gt_mask.any():
+                    d = distance_transform_edt(~gt_mask).astype(np.float32)
+                    d_mean = d.mean() + 1e-6
+                    dist_maps.append(1.0 + d / d_mean)
+                else:
+                    dist_maps.append(np.ones((out_h, out_w), dtype=np.float32))
+
+        gt = torch.from_numpy(np.stack(maps)).unsqueeze(1).float().to(self.device)
+        if dist_maps is not None:
+            dw = (
+                torch.from_numpy(np.stack(dist_maps)).unsqueeze(1).float().to(self.device)
+            )
+        else:
+            dw = None
+        return gt, dw
 
     def compute_loss(
         self,
@@ -446,8 +471,9 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         )
         scaled_points = self._scale_points_to_output(points, image_shapes, output_shapes)
 
+        dist_weights = None
         if gt_density is None:
-            gt_density = self._make_gt_density(scaled_points, H, W)
+            gt_density, dist_weights = self._make_gt_density(scaled_points, H, W)
 
         active = self.active_losses
         zero = density_map.new_zeros(1)
@@ -514,11 +540,11 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         # ---- Density L1 loss (pixel-wise L1 between normalized density maps) ----
         if "density_l1" in active:
             gt_density_normed = gt_density / (point_counts.view(B, 1, 1, 1) + 1e-4)
+            per_pixel = self.density_l1(normed_density, gt_density_normed)
+            if dist_weights is not None:
+                per_pixel = per_pixel * dist_weights
             density_l1_loss = (
-                self.density_l1(normed_density, gt_density_normed)
-                .sum(dim=[1, 2, 3])
-                .mul(point_counts)
-                .mean()
+                per_pixel.sum(dim=[1, 2, 3]).mul(point_counts).mean()
                 * self.density_l1_weight
             )
         else:
@@ -683,6 +709,7 @@ class Model(BaseModel):
                 mae_weight=cfg.mae_weight,
                 ot_weight=cfg.ot_weight,
                 density_l1_weight=cfg.density_l1_weight,
+                density_l1_dist_weight=cfg.density_l1_dist_weight,
                 count_cls_weight=cfg.count_cls_weight,
                 losses=list(cfg.losses) if cfg.losses is not None else None,
                 norm_cood=cfg.norm_cood,

@@ -156,6 +156,7 @@ class KeypointConfig:
     count_cls_weight: float = 0.025
     ot_weight: float = 0.4
     density_l1_weight: float = 0.01
+    density_l1_dist_weight: bool = False
     sinkhorn_reg: float = 1.0
     num_of_iter_in_ot: int = 100
     score_integration_radius: int = 5
