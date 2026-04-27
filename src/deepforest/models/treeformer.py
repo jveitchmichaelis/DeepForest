@@ -193,7 +193,10 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         return self._ot_loss
 
     def _normalize_density(
-        self, score_map: torch.Tensor, cls_count: torch.Tensor
+        self,
+        score_map: torch.Tensor,
+        cls_count: torch.Tensor,
+        gt_count: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return (density_map, normed_density) from raw score map and count
         scalar.
@@ -204,13 +207,24 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         * ``False`` (default): density_map = score_map (unconstrained
           scale). count_loss trains the spatial head directly.
         * ``True`` (physically-consistent): density_map =
-          score_normed * cls_count, so density_map.sum() == cls_count by
-          construction. OT/TV losses train the spatial distribution; count_loss
-          trains the CLS branch.
+          score_normed * count, so density_map.sum() == count by construction.
+          OT/TV losses train the spatial distribution; count_loss trains the
+          CLS branch. During training, ``gt_count`` is used when provided
+          (teacher forcing): the OT gradient to the spatial head is then scaled
+          by the correct GT count rather than the CLS prediction, which is noisy
+          early in training. At inference ``gt_count`` is unavailable so
+          ``cls_count`` is always used.
+
+        Note: with teacher forcing, ``density_map.sum() == gt_count`` exactly,
+        so ``count_loss`` (which compares density_map.sum() to gt_count) is
+        trivially zero. Count learning is unaffected because ``count_cls_loss``
+        still trains the CLS branch independently.
 
         Args:
             score_map:  (B, 1, H, W) raw non-negative output of the density head.
             cls_count:  (B,) absolute-count prediction from the CLS branch.
+            gt_count:   (B,) ground-truth point counts; used during training when
+                        enforce_count=True to stabilise the OT gradient scale.
 
         Returns:
             density_map:    (B, 1, H, W) density used for count_loss and output.
@@ -221,10 +235,13 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         score_sum = score_map.view(B, -1).sum(1).view(B, 1, 1, 1)
         normed = score_map / (score_sum + 1e-4)
         if self.enforce_count:
-            # abs() recovers valid magnitude when the CLS head goes slightly
-            # negative on sparse images; clamp floors at 1e-4 to avoid
-            # zero-mass density maps.
-            count = cls_count.view(B, 1, 1, 1).abs().clamp(min=1e-4)
+            if self.training and gt_count is not None:
+                count = gt_count.view(B, 1, 1, 1).clamp(min=1e-4)
+            else:
+                # abs() recovers valid magnitude when the CLS head goes slightly
+                # negative on sparse images; clamp floors at 1e-4 to avoid
+                # zero-mass density maps.
+                count = cls_count.view(B, 1, 1, 1).abs().clamp(min=1e-4)
             return normed * count, normed
         return score_map, normed
 
@@ -639,9 +656,15 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
                 dtype=out_L[0].dtype,
             )
             primary_counts = self._cls_outputs_to_count(out_cls_l[0], shapes)
+            gt_counts = torch.tensor(
+                [len(p) for p in self._cast_points(targets)],
+                dtype=torch.float32,
+                device=self.device,
+            )
             density_map, label_normed = self._normalize_density(
                 out_L[0] * output_mask,
                 primary_counts,
+                gt_count=gt_counts,
             )
 
             return self.compute_loss(

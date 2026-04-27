@@ -871,7 +871,9 @@ class deepforest(pl.LightningModule):
                             image_shapes=image_shapes_i,
                             output_shapes=output_shapes_i,
                         )
-                        gt_density_i = self.model._make_gt_density(scaled_pts_i, H_i, W_i)
+                        gt_density_i, _ = self.model._make_gt_density(
+                            scaled_pts_i, H_i, W_i
+                        )
                         self.density_samples.append(
                             {
                                 "image": images[i].detach().cpu(),
