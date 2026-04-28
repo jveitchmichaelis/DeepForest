@@ -23,9 +23,10 @@ model:
 train:
     csv_file: /Users/josh/data/Neon_benchmark/train.csv
     root_dir: /Users/josh/data/Neon_benchmark/images
-    optimizer: adamw
+    optimizer:
+      type: AdamW
+      weight_decay: 1e-5
     lr: 2e-4
-    weight_decay: 1e-5
     epochs: 60
     scheduler:
         type: cosine

@@ -16,8 +16,9 @@ train:
     csv_file: /home/veitchmichaelisj/code/DeepForest_jvm/data/kcl/london_train.csv
     root_dir: /home/veitchmichaelisj/code/DeepForest_jvm/data/kcl/train_data/images
     lr: 2e-4
-    optimizer: adamw
-    weight_decay: 1e-5
+    optimizer:
+      type: AdamW
+      weight_decay: 1e-5
     epochs: 500
     scheduler:
         type: cosine
