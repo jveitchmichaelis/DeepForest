@@ -1,6 +1,8 @@
 defaults:
-  - treeformer
+  - config
   - _self_
+
+architecture: treeformer
 
 batch_size: 32
 workers: 8
