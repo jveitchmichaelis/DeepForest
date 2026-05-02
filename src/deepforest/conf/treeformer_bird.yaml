@@ -3,6 +3,8 @@ defaults:
   - _self_
 
 architecture: treeformer
+model:
+    name: ~
 
 batch_size: 32
 workers: 8
