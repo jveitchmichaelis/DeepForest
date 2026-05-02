@@ -18,7 +18,6 @@ num_classes: 1
 train:
     csv_file: /blue/ewhite/b.weinstein/bird_detector_retrain/data/train.csv
     root_dir: /blue/ewhite/b.weinstein/bird_detector_retrain/data
-    same_size_images: true
     epochs: 40
     scheduler:
         params:
@@ -27,7 +26,6 @@ train:
 validation:
     csv_file: /blue/ewhite/b.weinstein/bird_detector_retrain/data/test.csv
     root_dir: /blue/ewhite/b.weinstein/bird_detector_retrain/data
-    same_size_images: true
     distance_threshold: 10.0
 
 keypoint:
