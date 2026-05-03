@@ -43,7 +43,7 @@ train:
           size: [512, 512]
           scale: [0.5, 1.0]
           ratio: [1.0, 1.0]
-          p: 0.5
+          p: 1.0
 
 validation:
     csv_file: /blue/ewhite/b.weinstein/bird_detector_retrain/data/test.csv
