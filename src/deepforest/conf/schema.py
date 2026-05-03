@@ -112,6 +112,7 @@ class ValidationConfig:
     limit_batches: float = 1.0
     same_size_images: bool = False
     validate_labels: bool = True
+    val_batch_size: int | None = None
 
 
 @dataclass

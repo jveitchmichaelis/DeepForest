@@ -452,7 +452,8 @@ class deepforest(pl.LightningModule):
                 shuffle=False,
                 preload_images=self.config.validation.preload_images,
                 same_size_images=self.config.validation.same_size_images,
-                batch_size=self.config.batch_size,
+                batch_size=self.config.validation.val_batch_size
+                or self.config.batch_size,
                 validate_labels=self.config.validation.validate_labels,
             )
             self.print(f"[rank {self.local_rank}] [val_dataloader] done")

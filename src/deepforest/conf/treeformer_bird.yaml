@@ -6,10 +6,13 @@ architecture: treeformer
 model:
     name: ~
 
-batch_size: 32
-workers: 8
+batch_size: 64
+workers: 4
 accelerator: auto
-
+precision: bf16-mixed
+matmul_precision: high
+score_thresh: 0.3
+ema_decay: 0.999
 label_dict:
     Bird: 0
 
@@ -18,10 +21,16 @@ num_classes: 1
 train:
     csv_file: /blue/ewhite/b.weinstein/bird_detector_retrain/data/train.csv
     root_dir: /blue/ewhite/b.weinstein/bird_detector_retrain/data
+    optimizer:
+      type: AdamW
+      weight_decay: 1e-5
+    lr: 2e-4
     epochs: 40
     scheduler:
+        type: cosine
         params:
             T_max: 40
+            eta_min: 1e-7
     validate_labels: false
     augmentations:
       - HorizontalFlip:
@@ -50,10 +59,9 @@ validation:
     root_dir: /blue/ewhite/b.weinstein/bird_detector_retrain/data
     distance_threshold: 10.0
     validate_labels: false
-    augmentations:
-      - RandomCrop:
-          size: [512, 512]
-          p: 1.0
+    val_accuracy_interval: 1
+    val_batch_size: 4
+    augmentations: []
 
 keypoint:
     density_sigma: 3.0
