@@ -36,6 +36,7 @@ class TrainingDataset(Dataset):
         label_dict=None,
         preload_images=False,
         same_size_images: bool = False,
+        validate_labels: bool = True,
     ):
         """
         Args:
@@ -86,7 +87,8 @@ class TrainingDataset(Dataset):
         log.info("[dataset] unique images: %d", len(self.image_names))
         self.preload_images = preload_images
 
-        self._validate_labels()
+        if validate_labels:
+            self._validate_labels()
 
         t2 = time.perf_counter()
         log.info(
@@ -121,9 +123,10 @@ class TrainingDataset(Dataset):
 
     @abstractmethod
     def _validate_coordinates(self) -> None:
-        """Validate geometries in the annotation data. Must be overidden by
-        child classes to implement task-specific checks (e.g., boxes vs
-        points).
+        """Validate geometries in the annotation data.
+
+        Must be overidden by child classes to implement task-specific
+        checks (e.g., boxes vs points).
 
         Should raise ValueError with details if any invalid geometries
         are found.

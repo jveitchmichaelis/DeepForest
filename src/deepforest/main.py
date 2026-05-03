@@ -134,7 +134,6 @@ class deepforest(pl.LightningModule):
         Returns:
             None
         """
-
         if model_name is None:
             model_name = self.config.model.name
 
@@ -182,8 +181,9 @@ class deepforest(pl.LightningModule):
         self.numeric_to_label_dict = {v: k for k, v in label_dict.items()}
 
     def create_model(self, initialize_model=False):
-        """Initialize a deepforest architecture. This can be done in two ways.
-        Passed as the model argument to deepforest __init__(), or as a named
+        """Initialize a deepforest architecture.
+
+        This can be done in two ways. Passed as the model argument to deepforest __init__(), or as a named
         architecture in config.architecture, which corresponds to a file in
         models/, as is a subclass of model.Model(). The config args in the
         .yaml are specified.
@@ -208,7 +208,6 @@ class deepforest(pl.LightningModule):
             callbacks: Optional list of callbacks
             **kwargs: Additional trainer arguments
         """
-
         # Setup metrics which may have changed if the config was modified
         self.setup_metrics()
 
@@ -336,9 +335,11 @@ class deepforest(pl.LightningModule):
         preload_images=False,
         batch_size=1,
         same_size_images: bool = False,
+        validate_labels: bool = True,
     ):
-        """Create a dataset for inference or training. Csv file format is .csv
-        file with the columns "image_path", "xmin","ymin","xmax","ymax" for the
+        """Create a dataset for inference or training.
+
+        Csv file format is .csv file with the columns "image_path", "xmin","ymin","xmax","ymax" for the
         image name and bounding box position. Image_path is the relative
         filename, not absolute path, which is in the root_dir directory. One
         bounding box per line.
@@ -353,7 +354,6 @@ class deepforest(pl.LightningModule):
         Returns:
             ds: a pytorch dataset
         """
-
         t0 = time.perf_counter()
         log.info("[load_dataset] creating %s dataset from %s", self.model.task, csv_file)
         if self.model.task == "box":
@@ -365,6 +365,7 @@ class deepforest(pl.LightningModule):
                 augmentations=augmentations,
                 preload_images=preload_images,
                 same_size_images=same_size_images,
+                validate_labels=validate_labels,
             )
         elif self.model.task == "keypoint":
             ds = training.KeypointDataset(
@@ -375,6 +376,7 @@ class deepforest(pl.LightningModule):
                 augmentations=augmentations,
                 preload_images=preload_images,
                 same_size_images=same_size_images,
+                validate_labels=validate_labels,
             )
         else:
             raise ValueError(
@@ -422,6 +424,7 @@ class deepforest(pl.LightningModule):
             shuffle=True,
             transforms=self.transforms,
             batch_size=self.config.batch_size,
+            validate_labels=self.config.train.validate_labels,
         )
         log.info("[train_dataloader] done")
 
@@ -450,6 +453,7 @@ class deepforest(pl.LightningModule):
                 preload_images=self.config.validation.preload_images,
                 same_size_images=self.config.validation.same_size_images,
                 batch_size=self.config.batch_size,
+                validate_labels=self.config.validation.validate_labels,
             )
             self.print(f"[rank {self.local_rank}] [val_dataloader] done")
 
@@ -554,7 +558,6 @@ class deepforest(pl.LightningModule):
         Returns:
             df: pandas dataframe with bounding boxes, label and scores for each image in the csv file
         """
-
         ds = prediction.FromCSVFile(csv_file=csv_file, root_dir=root_dir)
         dataloader = self.predict_dataloader(ds, batch_size=self.config.batch_size)
         results = predict._dataloader_wrapper_(
@@ -982,8 +985,9 @@ class deepforest(pl.LightningModule):
             self.mAP_metric.reset()
 
     def predict_step(self, batch, batch_idx):
-        """Predict a batch of images with the deepforest model. If batch is a
-        list, concatenate the images, predict and then split the results,
+        """Predict a batch of images with the deepforest model.
+
+        If batch is a list, concatenate the images, predict and then split the results,
         useful for main.predict_tile.
 
         Args:
