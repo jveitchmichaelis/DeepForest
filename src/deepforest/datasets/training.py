@@ -342,6 +342,7 @@ class KeypointDataset(TrainingDataset):
         label_dict=None,
         preload_images=False,
         same_size_images: bool = False,
+        validate_labels: bool = True,
         density_sigma=4.0,
         output="centroid",
     ):
@@ -364,6 +365,7 @@ class KeypointDataset(TrainingDataset):
             label_dict (dict[str, int]): Mapping from string labels in the CSV to integer class IDs (e.g., {"Tree": 0}).
             augmentations (str | list | dict, optional): Augmentation configuration.
             preload_images (bool): If True, preload all images into memory. Defaults to False.
+            validate_labels (bool): If True, validate that all labels in the CSV are in label_dict. Defaults to True.
             density_sigma (float): Standard deviation of the Gaussian kernel for density map generation. Defaults to 4.0.
             output (str): Output format, either "centroid" for point coordinates or "density" for Gaussian density maps. Defaults to "centroid".
         """
@@ -375,6 +377,7 @@ class KeypointDataset(TrainingDataset):
             label_dict=label_dict,
             preload_images=preload_images,
             same_size_images=same_size_images,
+            validate_labels=validate_labels,
         )
 
         self.density_sigma = density_sigma
