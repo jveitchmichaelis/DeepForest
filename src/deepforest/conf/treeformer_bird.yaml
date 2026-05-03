@@ -50,6 +50,10 @@ validation:
     root_dir: /blue/ewhite/b.weinstein/bird_detector_retrain/data
     distance_threshold: 10.0
     validate_labels: false
+    augmentations:
+      - RandomCrop:
+          size: [512, 512]
+          p: 1.0
 
 keypoint:
     density_sigma: 3.0
