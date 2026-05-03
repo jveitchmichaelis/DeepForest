@@ -32,9 +32,12 @@ train:
             T_max: 40
             eta_min: 1e-7
     validate_labels: false
+    # PadIfNeeded must come AFTER geometric transforms (flip/rotate/etc).
+    # K.PadTo uses an identity transform matrix, so if it runs first, any
+    # subsequent flip/rotate computes label coords in the original (pre-pad)
+    # image space while the pixel content is transformed in the padded space,
+    # causing a large label offset. Safe order: geo transforms -> pad -> crop.
     augmentations:
-      - PadIfNeeded:
-          size: [1024, 1024]
       - HorizontalFlip:
           p: 0.5
       - VerticalFlip:
@@ -50,6 +53,8 @@ train:
           hue: 0.05
           saturation: 0.2
           p: 0.5
+      - PadIfNeeded:
+          size: [1024, 1024]
       - RandomCrop:
           size: [1024, 1024]
           p: 1.0
