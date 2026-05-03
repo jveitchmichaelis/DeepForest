@@ -90,13 +90,15 @@ class TrainingDataset(Dataset):
         if validate_labels:
             self._validate_labels()
 
-        t2 = time.perf_counter()
-        log.info(
-            "[dataset] _validate_coordinates start (same_size_images=%s)",
-            self.same_size_images,
-        )
-        self._validate_coordinates()
-        log.info("[dataset] _validate_coordinates done: %.1fs", time.perf_counter() - t2)
+            t2 = time.perf_counter()
+            log.info(
+                "[dataset] _validate_coordinates start (same_size_images=%s)",
+                self.same_size_images,
+            )
+            self._validate_coordinates()
+            log.info(
+                "[dataset] _validate_coordinates done: %.1fs", time.perf_counter() - t2
+            )
 
         # Pin data to memory if desired
         if self.preload_images:
@@ -337,14 +339,9 @@ class KeypointDataset(TrainingDataset):
         csv_file,
         root_dir,
         *,
-        transforms=None,
-        augmentations=None,
-        label_dict=None,
-        preload_images=False,
-        same_size_images: bool = False,
-        validate_labels: bool = True,
         density_sigma=4.0,
         output="centroid",
+        **kwargs,
     ):
         """This dataset class returns keypoint annotations in one of two common
         formats.
@@ -361,24 +358,12 @@ class KeypointDataset(TrainingDataset):
         Args:
             csv_file (str): Path to the CSV file containing annotations.
             root_dir (str): Directory containing all referenced images.
-            transform (callable, optional): Function applied to each sample (e.g., image and target). Defaults to None.
-            label_dict (dict[str, int]): Mapping from string labels in the CSV to integer class IDs (e.g., {"Tree": 0}).
-            augmentations (str | list | dict, optional): Augmentation configuration.
-            preload_images (bool): If True, preload all images into memory. Defaults to False.
-            validate_labels (bool): If True, validate that all labels in the CSV are in label_dict. Defaults to True.
             density_sigma (float): Standard deviation of the Gaussian kernel for density map generation. Defaults to 4.0.
             output (str): Output format, either "centroid" for point coordinates or "density" for Gaussian density maps. Defaults to "centroid".
+            **kwargs: Additional arguments passed to TrainingDataset (transforms, augmentations, label_dict,
+                preload_images, same_size_images, validate_labels).
         """
-        super().__init__(
-            csv_file=csv_file,
-            root_dir=root_dir,
-            transforms=transforms,
-            augmentations=augmentations,
-            label_dict=label_dict,
-            preload_images=preload_images,
-            same_size_images=same_size_images,
-            validate_labels=validate_labels,
-        )
+        super().__init__(csv_file=csv_file, root_dir=root_dir, **kwargs)
 
         self.density_sigma = density_sigma
 
