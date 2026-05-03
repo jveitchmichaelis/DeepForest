@@ -246,6 +246,7 @@ class deepforest(pl.LightningModule):
             torch.set_float32_matmul_precision(self.config.matmul_precision)
 
         trainer_args = {
+            "suggest_integrations": False,
             "logger": logger,
             "max_epochs": self.config.train.epochs,
             "enable_checkpointing": enable_checkpointing,
