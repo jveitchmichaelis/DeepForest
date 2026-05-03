@@ -33,6 +33,8 @@ train:
             eta_min: 1e-7
     validate_labels: false
     augmentations:
+      - PadIfNeeded:
+          size: [1024, 1024]
       - HorizontalFlip:
           p: 0.5
       - VerticalFlip:
@@ -48,11 +50,9 @@ train:
           hue: 0.05
           saturation: 0.2
           p: 0.5
-      - RandomResizedCrop:
-          size: [512, 512]
-          scale: [0.5, 1.0]
-          ratio: [1.0, 1.0]
-          p: 0.5
+      - RandomCrop:
+          size: [1024, 1024]
+          p: 1.0
 
 validation:
     csv_file: /blue/ewhite/b.weinstein/bird_detector_retrain/data/test.csv
