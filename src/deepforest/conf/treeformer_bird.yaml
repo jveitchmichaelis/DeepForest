@@ -5,7 +5,7 @@ defaults:
 architecture: treeformer
 model:
     name: ~
-
+log_root: ./logs/treeformer
 batch_size: 32
 workers: 8
 accelerator: auto
