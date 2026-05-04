@@ -1,16 +1,20 @@
 """TreeFormer with PvT-V2 backbone.
 
-This class replicates the architecture in the TreeFormer paper (10.1109/TGRS.2023.3295802), which is
-an extension of DM-Count(arXiv:2009.13077). Here we only replicate the supervised branch.
-The architecture consists of a PvT-V2 backbone, with a multi-scale regression
-head that produces a density map at 1/4 input resolution and auxiliary outputs for counting.
+This class replicates the architecture in the TreeFormer paper
+(10.1109/TGRS.2023.3295802), which is an extension of DM-
+Count(arXiv:2009.13077). Here we only replicate the supervised branch.
+The architecture consists of a PvT-V2 backbone, with a multi-scale
+regression head that produces a density map at 1/4 input resolution and
+auxiliary outputs for counting.
 
-The archicture is modified to support a PvT-V2 backbone from HuggingFace transformers with
-a slightly cleaner version of the Regression head. There are several other modifications which
-we found necessary compared to the original architecture: the model outputs density predictions
-rather than absolute counts, which allows for transfer to varying image sizes at test-time. The
-outputs from the density head also are converted to points via peak detection and during training
-one can track both the number of peaks and the density map sum MAE.
+The archicture is modified to support a PvT-V2 backbone from HuggingFace
+transformers with a slightly cleaner version of the Regression head.
+There are several other modifications which we found necessary compared
+to the original architecture: the model outputs density predictions
+rather than absolute counts, which allows for transfer to varying image
+sizes at test-time. The outputs from the density head also are converted
+to points via peak detection and during training one can track both the
+number of peaks and the density map sum MAE.
 """
 
 import warnings
@@ -62,6 +66,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         count_cls_weight: float = 1.0,
         losses: list | None = None,
         norm_cood: bool = False,
+        norm_cood_scale: float | None = None,
         enforce_count: bool = True,
         **kwargs,
     ):
@@ -132,6 +137,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         self.count_cls_weight = count_cls_weight
         self.enforce_count = enforce_count
         self.norm_cood = norm_cood
+        self.norm_cood_scale = norm_cood_scale
 
         if losses is None:
             losses = ["count", "ot", "density_l1", "count_cls"]
@@ -172,6 +178,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
             "count_cls_weight": self.count_cls_weight,
             "losses": self.losses,
             "norm_cood": self.norm_cood,
+            "norm_cood_scale": self.norm_cood_scale,
             "enforce_count": self.enforce_count,
             **self.kwargs,
         }
@@ -184,11 +191,17 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         """Return optimal transport loss, creating it on first call with the
         current device."""
         if self._ot_loss is None:
+            coord_scale = (
+                self.density_sigma * self.norm_cood_scale
+                if self.norm_cood_scale is not None
+                else None
+            )
             self._ot_loss = OT_Loss(
                 self.norm_cood,
                 self.device,
                 self.ot_iter,
                 self.sinkhorn_reg,
+                coord_scale=coord_scale,
             )
         return self._ot_loss
 
@@ -445,8 +458,9 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         image_shapes: list[tuple[int, int]],
         gt_density: torch.Tensor | None = None,
     ) -> dict:
-        """Compute supervised losses. Individual losses can be disabled via the
-        ``losses`` constructor argument, but the default is to compute all.
+        """Compute supervised losses.
+
+        Individual losses can be disabled via the ``losses`` constructor argument, but the default is to compute all.
 
         The loss function for treeformer/DM-Count follows two pathways. Some losses
         aim to train the spatial structure of the density map (optimal transport and L1).
@@ -736,6 +750,7 @@ class Model(BaseModel):
                 count_cls_weight=cfg.count_cls_weight,
                 losses=list(cfg.losses) if cfg.losses is not None else None,
                 norm_cood=cfg.norm_cood,
+                norm_cood_scale=cfg.norm_cood_scale,
                 enforce_count=cfg.enforce_count,
                 **hf_args,
             )

@@ -1,7 +1,8 @@
 """PyTorch implementation of Sinkhorn-Knopp for optimal transport.
 
-Based on ot.bregman.sinkhorn from the Python Optimal Transport library
-(https://pythonot.github.io), rewritten in Pytorch and taken from the
+Based on ot.bregman.sinkhorn from the Python Optimal Transport library (
+https://pythonot.github.io),
+rewritten in Pytorch and taken from the
 TreeFormer repository. Some small changes have been made to the original
 code for stability and logging.
 
@@ -103,12 +104,19 @@ def sinkhorn_knopp(
 
 
 class OT_Loss(Module):
-    def __init__(self, norm_coord, device, num_of_iter_in_ot=100, reg=1.0):
+    def __init__(
+        self, norm_coord, device, num_of_iter_in_ot=100, reg=1.0, coord_scale=None
+    ):
         super().__init__()
         self.device = device
         self.norm_coord = norm_coord
         self.num_of_iter_in_ot = num_of_iter_in_ot
         self.reg = reg
+        # When set, coordinates are divided by this fixed pixel scale instead of
+        # using image-size normalisation (norm_coord=True) or raw pixels (False).
+        # Intended value: density_sigma * k (e.g. 9.0 for sigma=3, k=3), giving
+        # OT transport that is free within ~1 blob radius and blocked beyond ~9σ.
+        self.coord_scale = coord_scale
 
     @torch.autocast("cuda", enabled=False)
     @torch.autocast("cpu", enabled=False)
@@ -134,11 +142,13 @@ class OT_Loss(Module):
             torch.arange(output_h, dtype=torch.float32, device=self.device) + 0.5
         ).unsqueeze(0)
 
-        # Optionally normalize coordinates to [-1, 1]. We generally
-        # recommend this.
-        if self.norm_coord:
+        if self.coord_scale is not None:
+            x_cood = x_cood / self.coord_scale
+            y_cood = y_cood / self.coord_scale
+        elif self.norm_coord:
             x_cood = x_cood / output_w * 2 - 1
             y_cood = y_cood / output_h * 2 - 1
+        # else: raw pixel coordinates
 
         loss_terms = []
         ot_obj_values = torch.zeros([1]).to(self.device)
@@ -154,7 +164,10 @@ class OT_Loss(Module):
                 n_active += 1
 
                 # compute l2 square distance, it should be source target distance. [#gt, #cood * #cood]
-                if self.norm_coord:
+                if self.coord_scale is not None:
+                    x = im_points[:, 0].unsqueeze(1) / self.coord_scale
+                    y = im_points[:, 1].unsqueeze(1) / self.coord_scale
+                elif self.norm_coord:
                     x = im_points[:, 0].unsqueeze(1) / output_w * 2 - 1
                     y = im_points[:, 1].unsqueeze(1) / output_h * 2 - 1
                 else:

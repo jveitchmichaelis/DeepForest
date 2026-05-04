@@ -75,5 +75,6 @@ keypoint:
     score_integration_radius: 2
     losses: [count, count_cls, ot, density_l1]
     norm_cood: true
+    norm_cood_scale: ~
     enforce_count: true
     log_count_loss: false

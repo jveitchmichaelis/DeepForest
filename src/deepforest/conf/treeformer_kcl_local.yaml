@@ -1,0 +1,35 @@
+# Local London (KCL) config — uses data at data/treeformer/ on this machine.
+# Inherits all augmentations, loss weights, and scheduler from treeformer_kcl.
+# Override paths only; set shorter epochs for local comparison runs.
+#
+# Quick OT-regime comparison (10 epochs, MPS or CPU):
+#   norm_cood=false (v2 baseline):
+#     uv run deepforest --config-name=treeformer_kcl_local train
+#   sigma-scale k=3 (v3):
+#     uv run deepforest --config-name=treeformer_kcl_local train keypoint.norm_cood_scale=3.0
+defaults:
+  - treeformer_kcl
+  - _self_
+
+batch_size: 2
+workers: 2
+
+train:
+    csv_file: data/treeformer/train.csv
+    root_dir: data/treeformer/images
+    epochs: 10
+    scheduler:
+        type: cosine
+        params:
+            T_max: 10
+            eta_min: 1e-6
+
+validation:
+    csv_file: data/treeformer/test.csv
+    root_dir: data/treeformer/images
+    val_accuracy_interval: 1
+
+keypoint:
+    norm_cood: false
+    norm_cood_scale: ~
+    losses: [count_cls, ot, density_l1]
