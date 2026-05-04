@@ -147,8 +147,7 @@ class KeypointConfig:
     Parameters control the Gaussian density map generation and loss weighting.
 
     ``losses`` controls which loss terms are active. ``None`` enables all.
-    Valid values: ``count``, ``ot``, ``density_l1``, ``count_cls``,
-    ``uncertainty_mse``, ``uncertainty_reg``.
+    Valid values: ``count``, ``ot``, ``density_l1``, ``count_cls``.
 
     ``norm_cood`` normalises OT coordinates to [-1, 1], enabling global
     optimal transport (full output-map coverage). Default ``False`` matches
@@ -163,19 +162,12 @@ class KeypointConfig:
     count_cls_weight: float = 0.025
     ot_weight: float = 0.4
     density_l1_weight: float = 0.01
-    density_l1_dist_weight: bool = False
     sinkhorn_reg: float = 1.0
     num_of_iter_in_ot: int = 100
     score_integration_radius: int = 5
     losses: list[str] | None = None
     norm_cood: bool = True
-    # When set, OT coordinates are divided by (density_sigma * norm_cood_scale)
-    # instead of image size (norm_cood=True) or left as raw pixels (norm_cood=False).
-    # k=3 matches DM-Count's original locality (reg=10, raw pixels) at reg=1.0.
-    # Overrides norm_cood when set.
-    norm_cood_scale: float | None = None
     enforce_count: bool = True
-    log_count_loss: bool = False
 
 
 @dataclass

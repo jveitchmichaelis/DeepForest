@@ -28,12 +28,9 @@ keypoint:
     count_cls_weight: 0.1
     ot_weight: 0.1
     density_l1_weight: 0.05
-    density_l1_dist_weight: false
     sinkhorn_reg: 1.0
     num_of_iter_in_ot: 100
     score_integration_radius: 2
     losses: [count_cls, ot, density_l1]
     norm_cood: false
-    norm_cood_scale: ~
     enforce_count: true
-    log_count_loss: false

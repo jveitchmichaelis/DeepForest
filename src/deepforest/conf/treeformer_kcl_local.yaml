@@ -3,10 +3,10 @@
 # Override paths only; set shorter epochs for local comparison runs.
 #
 # Quick OT-regime comparison (10 epochs, MPS or CPU):
-#   norm_cood=false (v2 baseline):
+#   norm_cood=false, reg=1.0 (baseline):
 #     uv run deepforest --config-name=treeformer_kcl_local train
-#   sigma-scale k=3 (v3):
-#     uv run deepforest --config-name=treeformer_kcl_local train keypoint.norm_cood_scale=3.0
+#   norm_cood=false, reg=10 (DM-Count original):
+#     uv run deepforest --config-name=treeformer_kcl_local train keypoint.sinkhorn_reg=10.0
 defaults:
   - treeformer_kcl
   - _self_
@@ -31,5 +31,4 @@ validation:
 
 keypoint:
     norm_cood: false
-    norm_cood_scale: ~
     losses: [count_cls, ot, density_l1]
