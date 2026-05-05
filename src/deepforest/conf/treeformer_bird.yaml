@@ -77,6 +77,6 @@ keypoint:
     sinkhorn_reg: 1.0
     num_of_iter_in_ot: 100
     score_integration_radius: 2
-    losses: [count_cls, ot, density_l1]
+    losses: [count, ot, density_l1]
     norm_cood: false
-    enforce_count: true
+    enforce_count: false
