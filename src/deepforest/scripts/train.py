@@ -86,7 +86,6 @@ def train(
         to the model's hyperparameters as 'experiment_id' for later re-logging to
         the same experiment.
     """
-
     # matmul_precision is now set via config in create_trainer()
 
     if resume is True:
@@ -215,6 +214,7 @@ def train(
         gradient_clip_val=0.5,
         accelerator=config.accelerator,
         strategy=strategy,
+        default_root_dir=csv_logger.log_dir,
         plugins=[SLURMEnvironment(auto_requeue=slurm_auto_requeue)]
         if os.environ.get("SLURM_JOB_ID")
         else None,
