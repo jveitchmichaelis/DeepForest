@@ -54,7 +54,6 @@ class ImagesCallback(Callback):
     def on_train_start(self, trainer, pl_module):
         """Log sample images from training and validation datasets at training
         start."""
-
         if trainer.fast_dev_run:
             return
 
@@ -86,7 +85,6 @@ class ImagesCallback(Callback):
 
     def _log_dataset_sample(self, dataset: BoxDataset, split: str):
         """Log random samples from a DeepForest BoxDataset."""
-
         if self.dataset_samples == 0:
             return
 
@@ -107,7 +105,9 @@ class ImagesCallback(Callback):
             image_annotations = utilities.format_geometry(image_annotations, scores=False)
 
             basename = Path(path).stem
-            image = (255 * image.cpu().numpy().transpose((1, 2, 0))).astype(np.uint8)
+            image = (255 * image.float().cpu().numpy().transpose((1, 2, 0))).astype(
+                np.uint8
+            )
             out_path = os.path.join(out_dir, basename + ".png")
 
             if image_annotations is not None:
@@ -231,11 +231,11 @@ class ImagesCallback(Callback):
             image_name = sample["image_name"]
             basename = Path(image_name).stem + f"_{trainer.global_step}"
 
-            pred = sample["pred_density"].numpy()
-            gt = sample["gt_density"].numpy()
+            pred = sample["pred_density"].float().cpu().numpy()
+            gt = sample["gt_density"].float().cpu().numpy()
             # RGB image from CHW float tensor
             img = (
-                (255 * sample["image"].numpy().transpose(1, 2, 0))
+                (255 * sample["image"].float().cpu().numpy().transpose(1, 2, 0))
                 .clip(0, 255)
                 .astype(np.uint8)
             )
@@ -253,8 +253,8 @@ class ImagesCallback(Callback):
             ax0.imshow(img)
             if gt_points is not None and len(gt_points) > 0:
                 ax0.scatter(
-                    gt_points[:, 0].numpy(),
-                    gt_points[:, 1].numpy(),
+                    gt_points[:, 0].float().cpu().numpy(),
+                    gt_points[:, 1].float().cpu().numpy(),
                     s=10,
                     c="lime",
                     linewidths=0.5,
