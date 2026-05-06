@@ -24,13 +24,13 @@ validation:
 
 keypoint:
     density_sigma: 3.0
-    mae_weight: 0.5
+    mae_weight: 0.025
     count_cls_weight: 0.1
     ot_weight: 0.1
     density_l1_weight: 0.05
     sinkhorn_reg: 1.0
     num_of_iter_in_ot: 100
     score_integration_radius: 2
-    losses: [count_cls, ot, density_l1]
+    losses: [count, ot, density_l1]
     norm_cood: true
-    enforce_count: true
+    enforce_count: false
