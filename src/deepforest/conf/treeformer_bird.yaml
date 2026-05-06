@@ -70,7 +70,7 @@ validation:
 
 keypoint:
     density_sigma: 3.0
-    mae_weight: 0.5
+    mae_weight: 0.05
     count_cls_weight: 0.1
     ot_weight: 0.1
     density_l1_weight: 0.05

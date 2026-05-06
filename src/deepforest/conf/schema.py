@@ -168,6 +168,7 @@ class KeypointConfig:
     losses: list[str] | None = None
     norm_cood: bool = True
     enforce_count: bool = True
+    backbone: str = "OpenGVLab/pvt_v2_b3"
 
 
 @dataclass

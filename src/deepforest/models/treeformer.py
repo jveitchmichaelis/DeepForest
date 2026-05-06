@@ -470,19 +470,16 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         count_mae = self.cls_l1(pred_sum, point_counts)
         cls_preds = torch.stack([c.reshape(B) for c in cls_outputs])  # (3, B)
         gt_counts = point_counts.unsqueeze(0).expand(3, -1)  # (3, B)
-        cls_pred_counts = cls_preds * areas.unsqueeze(0)
-        count_cls_mae = self.cls_l1(cls_pred_counts, gt_counts)
 
         # ---- MAE count loss -----------------------------------------------
-        # Compare in density space (divide by area) to avoid area-amplified
-        # gradients on the CLS head when enforce_count is active.  With
-        # enforce_count, density_map.sum() ≈ raw_cls * area, so the chain-rule
-        # gradient includes an extra factor of area (~1M for 1024x1024 images).
-        # Dividing both sides by area cancels this factor, keeping the gradient
-        # magnitude comparable to count_cls_loss.
+        # Log-space L1 on density-integrated count vs gt_count.  log1p gives a
+        # stronger gradient than linear when pred_sum >> gt_count (early training)
+        # and is naturally scale-invariant: log(pred/area) - log(gt/area) =
+        # log(pred) - log(gt), so area normalisation is a no-op in log space.
         if "count" in active:
             count_loss = (
-                self.cls_l1(pred_sum / areas, point_counts / areas) * self.mae_weight
+                self.cls_l1(torch.log1p(pred_sum), torch.log1p(point_counts))
+                * self.mae_weight
             )
         else:
             count_loss = zero
@@ -541,8 +538,12 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         # amplify gradients by ~area^2 before Adam can adapt.
         if "count_cls" in active:
             # Raw CLS predicts count density; GT must match.
-            gt_counts = gt_counts / areas.unsqueeze(0)
-            count_cls_loss = self.cls_l1(cls_preds, gt_counts) * self.count_cls_weight
+            gt_counts_normed = gt_counts / areas.unsqueeze(0)
+            count_cls_loss = (
+                self.cls_l1(cls_preds, gt_counts_normed) * self.count_cls_weight
+            )
+            cls_pred_counts = cls_preds * areas.unsqueeze(0)
+            count_cls_mae = self.cls_l1(cls_pred_counts, gt_counts)
         else:
             count_cls_loss = zero
 
@@ -551,7 +552,6 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
             "loss": total,
             "count_mae": count_mae,
             "count_loss": count_loss,
-            "count_cls_mae": count_cls_mae,
             "ot_loss": ot_loss,
             "ot_wd": ot_wd,
             "sinkhorn_its": sinkhorn_its,
@@ -559,8 +559,10 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
             "sinkhorn_beta_abs_max": sinkhorn_beta_abs_max,
             "sinkhorn_err": sinkhorn_err,
             "density_l1_loss": density_l1_loss,
-            "count_cls_loss": count_cls_loss,
         }
+        if "count_cls" in active:
+            result["count_cls_mae"] = count_cls_mae
+            result["count_cls_loss"] = count_cls_loss
 
         return result
 
@@ -703,6 +705,7 @@ class Model(BaseModel):
                 losses=list(cfg.losses) if cfg.losses is not None else None,
                 norm_cood=cfg.norm_cood,
                 enforce_count=cfg.enforce_count,
+                backbone=cfg.backbone,
                 **hf_args,
             )
 
