@@ -1,20 +1,25 @@
-"""TreeFormer with PvT-V2 backbone.
+"""TreeFormer: multi-scale density estimation for aerial imagery.
 
-This class replicates the architecture in the TreeFormer paper
-(10.1109/TGRS.2023.3295802), which is an extension of DM-
-Count(arXiv:2009.13077). Here we only replicate the supervised branch.
-The architecture consists of a PvT-V2 backbone, with a multi-scale
-regression head that produces a density map at 1/4 input resolution and
-auxiliary outputs for counting.
+This module replicates the architecture from the TreeFormer paper
+(10.1109/TGRS.2023.3295802), which extends DM-Count (arXiv:2009.13077).
+Only the supervised branch is implemented.
 
-The archicture is modified to support a PvT-V2 backbone from HuggingFace
-transformers with a slightly cleaner version of the Regression head.
-There are several other modifications which we found necessary compared
-to the original architecture: the model outputs density predictions
-rather than absolute counts, which allows for transfer to varying image
-sizes at test-time. The outputs from the density head also are converted
-to points via peak detection and during training one can track both the
-number of peaks and the density map sum MAE.
+Two backbone families are supported:
+
+* **PvT-V2** (default) -- ``OpenGVLab/pvt_v2_b{0-5}``.  The backbone
+  natively produces 4 multi-scale feature maps at strides 4/8/16/32.
+
+* **DINOv3 ViT** -- any HuggingFace model ID containing ``"dino"``
+  (e.g. ``"facebook/dinov3-vits16-pretrain-lvd1689m"``).  A ViTDet-
+  style adapter is used: the final ``last_hidden_state`` is reshaped to
+  a spatial grid at stride ``patch_size``, then bilinear upsampling and
+  average pooling produce the 4-scale pyramid (strides 4/8/16/32)
+  expected by the Regression head.
+
+In both cases the rest of the pipeline -- channel projection, the
+multi-scale Regression head, losses and inference -- is identical.
+The model predicts density maps (not raw counts) so that it transfers
+to variable image sizes at test time.
 """
 
 import warnings
@@ -25,15 +30,58 @@ import torch.nn as nn
 import torch.nn.functional as F
 from huggingface_hub import PyTorchModelHubMixin
 from scipy.ndimage import gaussian_filter
-from transformers import AutoConfig, AutoImageProcessor, PvtV2Config, PvtV2Model
+from transformers import (
+    AutoConfig,
+    AutoImageProcessor,
+    AutoModel,
+    PvtV2Config,
+    PvtV2Model,
+)
 
 from deepforest.losses.ot_loss import OT_Loss
 from deepforest.model import BaseModel
 from deepforest.models.treeformer_decoder import Regression
 
 
+class LayerNorm2d(nn.Module):
+    """Per-position channel LayerNorm for (B, C, H, W) tensors.
+
+    Normalises over the channel dim at each spatial position without
+    permuting (avoids non-contiguous tensor issues in autograd).
+    Equivalent to nn.LayerNorm([C]) applied independently per pixel.
+    Implementation follows SAM / VitDet reference code.
+    """
+
+    def __init__(self, num_channels: int, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(num_channels))
+        self.bias = nn.Parameter(torch.zeros(num_channels))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        u = x.mean(1, keepdim=True)
+        s = (x - u).pow(2).mean(1, keepdim=True)
+        x = (x - u) / torch.sqrt(s + self.eps)
+        return self.weight[:, None, None] * x + self.bias[:, None, None]
+
+
 class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
-    """PvT-V2 backbone + Regression head for density estimation."""
+    """Multi-scale density estimation model with a pluggable backbone.
+
+    Supports two backbone families, selected by the ``backbone`` string:
+
+    * **PvT-V2** (default) – ``"OpenGVLab/pvt_v2_b3"`` (or any ``pvt_v2_b*``
+      variant).  Loaded via :class:`transformers.PvtV2Model`.  The backbone
+      produces 4 multi-scale feature maps at strides 4/8/16/32.
+
+    * **DINOv3 ViT** – any string containing ``"dino"``
+      (e.g. ``"facebook/dinov3-vits16-pretrain-lvd1689m"``).  Loaded via
+      :class:`transformers.AutoModel`.  A ViTDet-style adapter takes the
+      final ``last_hidden_state``, reshapes patch tokens to a spatial grid,
+      then generates the 4-scale pyramid (strides 4/8/16/32) via bilinear
+      upsampling and average pooling to match the
+      :class:`~deepforest.models.treeformer_decoder.Regression` head.
+    """
 
     task = "keypoint"
 
@@ -49,6 +97,16 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
 
     # Fixed dims Regression expects
     REG_DIMS = [128, 256, 512, 1024]
+
+    # Intermediate transformer layers to extract for the DPT-style 4-scale pyramid.
+    # Early layers → fine scales (more local structure); late → coarse (more semantic).
+    # ViT-G indices match DINOv3 paper §appendix Table 6.
+    DINO_EXTRACT_LAYERS = {
+        "vits": [3, 6, 9, 12],  # 12 layers
+        "vitb": [3, 6, 9, 12],  # 12 layers (wider than S, same depth)
+        "vitl": [6, 12, 18, 24],  # 24 layers
+        "vitg": [10, 20, 30, 40],  # 40 layers — DINOv3 paper §appendix Table 6
+    }
 
     def __init__(
         self,
@@ -68,62 +126,46 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         enforce_count: bool = True,
         **kwargs,
     ):
-        """Initialize TreeFormerModel."""
+        """Initialize TreeFormerModel.
+
+        Args:
+            backbone: HuggingFace model ID.  PvT-V2 variants
+                (``pvt_v2_b0`` through ``pvt_v2_b5``) and DINOv3 ViT models
+                (any ID containing ``"dino"``, e.g.
+                ``"facebook/dinov3-vits16-pretrain-lvd1689m"``) are supported.
+            pretrained: Load pre-trained weights from the Hub.  For DINOv3
+                this is always ``True``; passing ``False`` is only respected
+                for PvT-V2 backbones.
+            num_classes: Number of output density channels.
+            label_dict: Optional mapping from class label to integer index.
+            num_of_iter_in_ot: Sinkhorn iterations for OT loss.
+            sinkhorn_reg: Regularisation coefficient for OT loss.
+            density_sigma: Gaussian smoothing sigma for GT density maps.
+            mae_weight: Weight for the count MAE loss term.
+            ot_weight: Weight for the OT loss term.
+            density_l1_weight: Weight for the density L1 (TV) loss term.
+            count_cls_weight: Weight for the CLS-branch count loss.
+            losses: Active loss terms; defaults to
+                ``["count", "ot", "density_l1", "count_cls"]``.
+            norm_cood: Normalise coordinates before computing OT loss.
+            enforce_count: Rescale density map so its sum equals the CLS
+                count prediction.
+        """
         super().__init__()
         self.backbone_name = backbone
 
-        # Processor handles ImageNet normalization
-        self.processor = AutoImageProcessor.from_pretrained(
-            backbone,
-            use_fast=True,
-            do_normalize=True,
-            do_rescale=False,
-            do_resize=False,
-        )
-
-        if pretrained:
-            self.backbone = PvtV2Model.from_pretrained(backbone)
+        if "dino" in backbone.lower():
+            self._init_dino_backbone(backbone)
         else:
-            config = AutoConfig.from_pretrained(backbone)
-            if not isinstance(config, PvtV2Config):
-                raise TypeError(
-                    f"Expected PvtV2Config for backbone {backbone}, got {type(config).__name__}"
-                )
-            self.backbone = PvtV2Model(config)
+            self._init_pvt_backbone(backbone, pretrained)
 
-        self.backbone.gradient_checkpointing_enable(
-            gradient_checkpointing_kwargs={"use_reentrant": False}
-        )
-
-        # Suppress some noisy warnings that show in DDP.
-        torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
-        for module in self.backbone.modules():
-            if (
-                isinstance(module, nn.Conv2d)
-                and module.groups > 1
-                and module.groups == module.in_channels
-            ):
-                module.weight.register_hook(lambda grad: grad.contiguous())
-
-        variant = backbone.split("/")[-1]
-        src = self.HIDDEN_SIZES.get(variant, None)
-        if src is None:
-            raise ValueError(
-                f"Backbone variant {variant} isn't supported. Please use one of {list(self.HIDDEN_SIZES.keys())}"
-            )
-
-        self.proj = nn.ModuleList(
-            [nn.Conv2d(s, d, 1) for s, d in zip(src, self.REG_DIMS, strict=True)]
-        )
         self.num_classes = num_classes
         self.label_dict = label_dict
         self.regression = Regression(num_classes=num_classes)
         self.ot_iter = num_of_iter_in_ot
 
-        # This is the output stride of the model and is
-        # fixed for PvtV2. We store it for convenience
-        # since it's used by various loss functions as a
-        # scaling factor.
+        # Output stride is 4 for both backbone families: the primary density
+        # map is always at 1/4 the input spatial resolution.
         self.downsample_ratio = 4
 
         self.sinkhorn_reg = sinkhorn_reg
@@ -157,6 +199,151 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
 
         self.kwargs = kwargs
         self.update_config()
+
+    # ------------------------------------------------------------------
+    # Backbone initialisation helpers
+    # ------------------------------------------------------------------
+
+    def _init_pvt_backbone(self, backbone: str, pretrained: bool) -> None:
+        """Set up PvT-V2 backbone, processor, and channel projections."""
+        self.processor = AutoImageProcessor.from_pretrained(
+            backbone,
+            use_fast=True,
+            do_normalize=True,
+            do_rescale=False,
+            do_resize=False,
+        )
+
+        if pretrained:
+            self.backbone = PvtV2Model.from_pretrained(backbone)
+        else:
+            config = AutoConfig.from_pretrained(backbone)
+            if not isinstance(config, PvtV2Config):
+                raise TypeError(
+                    f"Expected PvtV2Config for backbone {backbone}, "
+                    f"got {type(config).__name__}"
+                )
+            self.backbone = PvtV2Model(config)
+
+        self.backbone.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+
+        # Suppress some noisy warnings that show in DDP.
+        torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
+        for module in self.backbone.modules():
+            if (
+                isinstance(module, nn.Conv2d)
+                and module.groups > 1
+                and module.groups == module.in_channels
+            ):
+                module.weight.register_hook(lambda grad: grad.contiguous())
+
+        variant = backbone.split("/")[-1]
+        src = self.HIDDEN_SIZES.get(variant, None)
+        if src is None:
+            raise ValueError(
+                f"Backbone variant {variant} isn't supported. "
+                f"Please use one of {list(self.HIDDEN_SIZES.keys())}"
+            )
+        self.proj = nn.ModuleList(
+            [nn.Conv2d(s, d, 1) for s, d in zip(src, self.REG_DIMS, strict=True)]
+        )
+        # PvT stride: the coarsest stage output (x3) is at stride 32.
+        self.forward_stride = 32
+
+    def _init_dino_backbone(self, backbone: str) -> None:
+        """Set up DINOv3 ViT backbone, processor, and channel projections.
+
+        ViTDet-style adapter: the final ``last_hidden_state`` is reshaped
+        to a spatial grid at stride ``patch_size``, then bilinear upsampling
+        and average pooling generate the 4-scale pyramid (strides 4/8/16/32)
+        that ``Regression`` expects.  Each scale is projected independently
+        to its target channel dim via a 1x1 conv in ``self.proj``.
+        """
+        self.processor = AutoImageProcessor.from_pretrained(
+            backbone,
+            do_normalize=True,
+            do_rescale=False,
+            do_resize=False,
+        )
+        self.backbone = AutoModel.from_pretrained(backbone)
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+        cfg = self.backbone.config
+        hidden_size: int = cfg.hidden_size
+        self.dino_patch_size: int = cfg.patch_size
+        self.dino_num_register_tokens: int = getattr(cfg, "num_register_tokens", 0)
+        self.dino_num_hidden_layers: int = cfg.num_hidden_layers
+
+        # DPT-style multi-layer extraction: assign intermediate transformer layers
+        # to the four output scales (early layers → fine scales, late → coarse),
+        # mirroring DINOv3 paper §appendix Table 6.
+        # Each extracted layer gets a 1×1 conv before the scale-specific proj.
+        variant_key = next(
+            (k for k in self.DINO_EXTRACT_LAYERS if k in backbone.lower()), None
+        )
+        if variant_key is not None:
+            self.dino_extract_layers = self.DINO_EXTRACT_LAYERS[variant_key]
+        else:
+            n = self.dino_num_hidden_layers
+            self.dino_extract_layers = [n // 4, n // 2, 3 * n // 4, n]
+        self.layer_projs = nn.ModuleList(
+            [nn.Conv2d(hidden_size, hidden_size, kernel_size=1) for _ in range(4)]
+        )
+
+        # ViTDet simple feature pyramid (Li et al. 2022, §3.1) with VitDet's
+        # per-level LayerNorm + 3×3 conv + LayerNorm refinement to smooth
+        # token-boundary grid artifacts.
+        #   proj[0]: deconv ×4 + refine → stride patch_size/4  (finest)
+        #   proj[1]: deconv ×2 + refine → stride patch_size/2
+        #   proj[2]: 1×1 conv + refine  → stride patch_size     (identity)
+        #   proj[3]: stride-2 conv + refine → stride patch_size×2 (coarsest)
+        mid = hidden_size
+        self.proj = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.ConvTranspose2d(hidden_size, mid, kernel_size=2, stride=2),
+                    nn.GELU(),
+                    nn.ConvTranspose2d(mid, self.REG_DIMS[0], kernel_size=2, stride=2),
+                    LayerNorm2d(self.REG_DIMS[0]),
+                    nn.Conv2d(
+                        self.REG_DIMS[0], self.REG_DIMS[0], kernel_size=3, padding=1
+                    ),
+                    LayerNorm2d(self.REG_DIMS[0]),
+                ),
+                nn.Sequential(
+                    nn.ConvTranspose2d(
+                        hidden_size, self.REG_DIMS[1], kernel_size=2, stride=2
+                    ),
+                    LayerNorm2d(self.REG_DIMS[1]),
+                    nn.Conv2d(
+                        self.REG_DIMS[1], self.REG_DIMS[1], kernel_size=3, padding=1
+                    ),
+                    LayerNorm2d(self.REG_DIMS[1]),
+                ),
+                nn.Sequential(
+                    nn.Conv2d(hidden_size, self.REG_DIMS[2], kernel_size=1),
+                    LayerNorm2d(self.REG_DIMS[2]),
+                    nn.Conv2d(
+                        self.REG_DIMS[2], self.REG_DIMS[2], kernel_size=3, padding=1
+                    ),
+                    LayerNorm2d(self.REG_DIMS[2]),
+                ),
+                nn.Sequential(
+                    nn.Conv2d(hidden_size, self.REG_DIMS[3], kernel_size=2, stride=2),
+                    LayerNorm2d(self.REG_DIMS[3]),
+                    nn.Conv2d(
+                        self.REG_DIMS[3], self.REG_DIMS[3], kernel_size=3, padding=1
+                    ),
+                    LayerNorm2d(self.REG_DIMS[3]),
+                ),
+            ]
+        )
+        # Images must be divisible by patch_size*2 so that the coarsest
+        # scale (strided conv ×2 on H_p=H/patch_size) is an integer.
+        self.forward_stride = self.dino_patch_size * 2
 
     def update_config(self):
         # Stored as config on HF
@@ -355,12 +542,49 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         """Run backbone and project stage outputs to REG_DIMS.
 
         Returns:
-            feats: list of 4 spatial tensors (B, REG_DIMS[i], H/4^i, W/4^i)
-            cls:   list of 3 vectors (B, REG_DIMS[1..3]) - GAP of stages 1-3,
-                   substituting the cls tokens from PvT-v1.
+            feats: list of 4 spatial tensors
+                   ``(B, REG_DIMS[i], H_i, W_i)`` at strides 4, 8, 16, 32.
+            cls:   list of 3 vectors ``(B, REG_DIMS[j])`` for j in 1..3 -
+                   global average-pooled features for the CLS-branch count
+                   head (substitutes PvT-v1 CLS tokens).
         """
+        if "dino" in self.backbone_name.lower():
+            return self._forward_features_dino(x)
+        return self._forward_features_pvt(x)
+
+    def _forward_features_pvt(self, x: torch.Tensor):
+        """PvT-V2 feature extraction path."""
         out = self.backbone(x, output_hidden_states=True)
         feats = [p(h) for p, h in zip(self.proj, out.hidden_states, strict=False)]
+        cls = [feats[i].mean(dim=[2, 3]) for i in range(1, 4)]
+        return feats, cls
+
+    def _forward_features_dino(self, x: torch.Tensor):
+        """DINOv3 ViT feature extraction with DPT-style multi-layer adapter.
+
+        Extracts hidden states from 4 evenly-spaced transformer layers
+        (e.g. [3, 6, 9, 12] for ViT-S/12), assigns each to a scale in
+        the output pyramid (early layers → fine scales, late → coarse),
+        applies a per-layer 1×1 projection, then the scale-specific
+        conv/deconv with VitDet-style LN+3×3+LN refinement.
+        """
+        out = self.backbone(x, output_hidden_states=True)
+        # hidden_states[0] = patch embedding; hidden_states[k] = after block k
+        hidden_states = out.hidden_states
+
+        B, _, H, W = x.shape
+        H_p = H // self.dino_patch_size
+        W_p = W // self.dino_patch_size
+        R = self.dino_num_register_tokens
+
+        feats = []
+        for i, layer_idx in enumerate(self.dino_extract_layers):
+            tokens = hidden_states[layer_idx]  # (B, 1+R+P, D)
+            patches = tokens[:, 1 + R :, :]  # (B, P, D)
+            spatial = patches.permute(0, 2, 1).contiguous().reshape(B, -1, H_p, W_p)
+            spatial = self.layer_projs[i](spatial)
+            feats.append(self.proj[i](spatial))
+
         cls = [feats[i].mean(dim=[2, 3]) for i in range(1, 4)]
         return feats, cls
 
@@ -472,10 +696,8 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         gt_counts = point_counts.unsqueeze(0).expand(3, -1)  # (3, B)
 
         # ---- MAE count loss -----------------------------------------------
-        # Log-space L1 on density-integrated count vs gt_count.  log1p gives a
-        # stronger gradient than linear when pred_sum >> gt_count (early training)
-        # and is naturally scale-invariant: log(pred/area) - log(gt/area) =
-        # log(pred) - log(gt), so area normalisation is a no-op in log space.
+        # log1p compresses large early-training errors, preventing the count
+        # gradient from overwhelming the spatial losses (OT + density_l1).
         if "count" in active:
             count_loss = (
                 self.cls_l1(torch.log1p(pred_sum), torch.log1p(point_counts))
@@ -600,9 +822,11 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
             shapes = [(inputs.shape[2], inputs.shape[3])] * inputs.shape[0]
             batch = inputs
 
-        # Pad to next multiple of 32 for PvT stride compatibility.
+        # Pad to next multiple of forward_stride so that the backbone's
+        # coarsest output has integer spatial dimensions.
         H, W = batch.shape[2:]
-        batch = F.pad(batch, (0, (32 - W % 32) % 32, 0, (32 - H % 32) % 32))
+        s = self.forward_stride
+        batch = F.pad(batch, (0, (s - W % s) % s, 0, (s - H % s) % s))
         padded_h, padded_w = batch.shape[2:]
 
         encoded = self.processor.preprocess(

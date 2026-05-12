@@ -2,7 +2,7 @@
 # Inherits all augmentations, loss weights, and scheduler from treeformer_kcl.
 # Override paths only; set shorter epochs for local comparison runs.
 #
-# Quick OT-regime comparison (10 epochs, MPS or CPU):
+# Quick OT-regime comparison (2 epochs, MPS or CPU — enough to screen viability):
 #   norm_cood=false, reg=1.0 (baseline):
 #     uv run deepforest --config-name=treeformer_kcl_local train
 #   norm_cood=false, reg=10 (DM-Count original):
@@ -12,23 +12,33 @@ defaults:
   - _self_
 
 batch_size: 2
-workers: 2
+workers: 1
 
 train:
     csv_file: data/treeformer/train.csv
     root_dir: data/treeformer/images
-    epochs: 10
+    epochs: 50
     scheduler:
         type: cosine
         params:
-            T_max: 10
+            T_max: 500
             eta_min: 1e-6
+            warmup_epochs: 5
 
 validation:
     csv_file: data/treeformer/test.csv
     root_dir: data/treeformer/images
     val_accuracy_interval: 1
 
+log_root: ./treeformer_logs
+
 keypoint:
-    norm_cood: false
-    losses: [count_cls, ot, density_l1]
+    norm_cood: true
+    enforce_count: false
+    mae_weight: 0.5
+    ot_weight: 0.1
+    count_cls_weight: 0.0
+    density_l1_weight: 0.1
+    sinkhorn_reg: 1.0
+    losses: [count, ot, density_l1]
+    backbone: facebook/dinov3-vits16-pretrain-lvd1689m

@@ -8,6 +8,7 @@ import os
 
 import pytest
 import torch
+import torch.nn as nn
 
 from deepforest import get_data, utilities
 from deepforest.datasets.training import KeypointDataset
@@ -320,3 +321,107 @@ def test_ot_loss_all_empty_points_has_grad():
     assert loss.requires_grad, "loss must require grad when all point lists are empty"
     # Should not raise.
     loss.backward()
+
+
+# ---------------------------------------------------------------------------
+# DINOv3 ViT backbone
+# ---------------------------------------------------------------------------
+
+# Smallest publicly available DINOv3 ViT checkpoint.
+_DINO_BACKBONE = "facebook/dinov3-vits16-pretrain-lvd1689m"
+
+
+@pytest.fixture(scope="module")
+def dino_model():
+    """TreeFormerModel with a DINOv3 ViT backbone (downloaded once per session)."""
+    return TreeFormerModel(backbone=_DINO_BACKBONE, enforce_count=True)
+
+
+def test_dino_backbone_attributes(dino_model):
+    """DINOv3 model exposes the expected backbone-specific attributes."""
+    assert dino_model.dino_patch_size == 16
+    assert isinstance(dino_model.dino_num_register_tokens, int)
+    assert dino_model.dino_num_hidden_layers > 0
+    assert dino_model.forward_stride == dino_model.dino_patch_size * 2
+    assert dino_model.downsample_ratio == 4
+
+
+def test_dino_proj_dims(dino_model):
+    """Channel projection layers map from hidden_size to REG_DIMS."""
+    hidden_size = dino_model.backbone.config.hidden_size
+
+    # layer_projs: per-layer 1×1 convs, all hidden_size → hidden_size
+    for lp in dino_model.layer_projs:
+        assert lp.in_channels == hidden_size
+        assert lp.out_channels == hidden_size
+
+    # proj[i]: Sequential — first conv takes hidden_size, last Conv2d outputs REG_DIMS[i]
+    for seq, expected_out in zip(dino_model.proj, TreeFormerModel.REG_DIMS):
+        first_conv = seq[0]
+        assert first_conv.in_channels == hidden_size
+        last_conv = next(
+            m for m in reversed(list(seq.children())) if isinstance(m, nn.Conv2d)
+        )
+        assert last_conv.out_channels == expected_out
+
+
+def test_dino_forward_features_backward(dino_model):
+    """Gradients flow through the adapter without contiguity errors."""
+    x = torch.rand(1, 3, 256, 256)
+    feats, _ = dino_model.forward_features(x)
+    loss = sum(f.sum() for f in feats)
+    loss.backward()  # would raise RuntimeError if permute produced non-contiguous grad
+
+
+def test_dino_forward_features_shapes(dino_model):
+    """forward_features returns 4 feature maps at the correct spatial scales."""
+    H, W = 256, 256
+    x = torch.rand(1, 3, H, W)
+    with torch.no_grad():
+        feats, cls = dino_model.forward_features(x)
+
+    assert len(feats) == 4
+    assert len(cls) == 3
+
+    dr = dino_model.downsample_ratio  # 4
+    expected_spatial = [
+        (H // 4, W // 4),   # stride 4
+        (H // 8, W // 8),   # stride 8
+        (H // 16, W // 16), # stride 16
+        (H // 32, W // 32), # stride 32
+    ]
+    for feat, (eh, ew), expected_channels in zip(
+        feats, expected_spatial, TreeFormerModel.REG_DIMS
+    ):
+        assert feat.shape == (1, expected_channels, eh, ew), (
+            f"Expected (1, {expected_channels}, {eh}, {ew}), got {tuple(feat.shape)}"
+        )
+
+    # CLS vectors: GAP of feats[1], feats[2], feats[3]
+    for c, feat in zip(cls, feats[1:]):
+        assert c.shape == (1, feat.shape[1])
+
+
+def test_dino_forward_eval_output_shape(dino_model):
+    """Eval forward pass returns density maps at 1/4 input resolution."""
+    H, W = 256, 192
+    dino_model.eval()
+    with torch.no_grad():
+        density_maps, normed = dino_model([torch.rand(3, H, W)])
+
+    dr = dino_model.downsample_ratio
+    assert density_maps[0].shape == (1, 1, H // dr, W // dr)
+    assert normed[0].shape == (1, 1, H // dr, W // dr)
+
+
+def test_dino_forward_train_loss_dict(dino_model):
+    """Training mode returns a finite loss dict with all expected keys."""
+    dino_model.train()
+    images = [torch.rand(3, 64, 64) for _ in range(2)]
+    targets = _make_targets(2, n_points=4)
+    loss_dict = dino_model(images, targets)
+
+    assert "loss" in loss_dict
+    assert torch.isfinite(loss_dict["loss"])
+    assert loss_dict["loss"].item() > 0
+    dino_model.eval()

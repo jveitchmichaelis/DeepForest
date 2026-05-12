@@ -22,6 +22,7 @@ class SchedulerParamsConfig:
 
     T_max: int = 10
     eta_min: float = 1e-5
+    warmup_epochs: int = 0
     lr_lambda: str = "0.95 ** epoch"
     step_size: int = 30
     gamma: float = 0.1

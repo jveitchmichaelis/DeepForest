@@ -1134,6 +1134,20 @@ class deepforest(pl.LightningModule):
                 "exponentialLR, ReduceLROnPlateau."
             )
 
+        warmup_epochs = getattr(params, "warmup_epochs", 0)
+        if warmup_epochs > 0:
+            warmup = torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor=1.0 / warmup_epochs,
+                end_factor=1.0,
+                total_iters=warmup_epochs,
+            )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer,
+                schedulers=[warmup, scheduler],
+                milestones=[warmup_epochs],
+            )
+
         # Monitor learning rate if val data is used
         if self.config.validation.csv_file is not None:
             return {

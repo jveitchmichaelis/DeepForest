@@ -54,6 +54,7 @@ validation:
     distance_threshold: 10.0
 
 keypoint:
+    backbone: ~
     norm_cood: true
     mae_weight: 1.0
     ot_weight: 0.1
