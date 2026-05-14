@@ -1,0 +1,51 @@
+# NEON pretraining for DINOv3 adapter + Regression head.
+#
+# Train the adapter (proj, layer_projs) and Regression decoder on NEON before
+# fine-tuning on London. Backbone is frozen; gradients only flow through the
+# adapter and decoder (~15M params). Mirrors the DINOv3 paper pattern of
+# pretraining the head on a large dataset before domain fine-tuning.
+#
+# After training, use the checkpoint as initialisation for treeformer_kcl:
+#   uv run deepforest --config-name=treeformer_kcl train \
+#     model.name=null train.pretrained_weights=/path/to/neon_dino.ckpt
+#
+# Run on cluster:
+#   sbatch treeformer.slurm --config-name=treeformer_neon_dino train
+defaults:
+  - treeformer
+  - _self_
+
+batch_size: 32
+workers: 8
+
+train:
+    csv_file: /blue/ewhite/veitchmichaelisj/deeplidar/output/folds/all_annotations_train_fold_0.csv
+    root_dir: /blue/ewhite/veitchmichaelisj/deeplidar/output
+    same_size_images: true
+    lr: 4e-4
+    epochs: 100
+    scheduler:
+        type: cosine
+        params:
+            T_max: 100
+            eta_min: 1e-6
+            warmup_epochs: 5
+
+validation:
+    csv_file: /blue/ewhite/veitchmichaelisj/deeplidar/output/folds/all_annotations_val_fold_0.csv
+    root_dir: /blue/ewhite/veitchmichaelisj/deeplidar/output
+    same_size_images: true
+    distance_threshold: 10.0
+
+keypoint:
+    backbone: facebook/dinov3-vits16-pretrain-lvd1689m
+    losses: [count_cls, ot, density_l1]
+    enforce_count: true
+    norm_cood: true
+    sinkhorn_reg: 1.0
+    mae_weight: 0.5
+    count_cls_weight: 0.1
+    ot_weight: 0.1
+    density_l1_weight: 0.1
+    density_sigma: 3.0
+    score_integration_radius: 2
