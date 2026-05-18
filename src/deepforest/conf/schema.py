@@ -170,6 +170,7 @@ class KeypointConfig:
     norm_cood: bool = True
     enforce_count: bool = True
     backbone: str = "OpenGVLab/pvt_v2_b3"
+    dino_unfreeze_last_n: int = 0
 
 
 @dataclass

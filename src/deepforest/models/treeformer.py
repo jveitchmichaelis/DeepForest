@@ -124,6 +124,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         losses: list | None = None,
         norm_cood: bool = False,
         enforce_count: bool = True,
+        dino_unfreeze_last_n: int = 0,
         **kwargs,
     ):
         """Initialize TreeFormerModel.
@@ -150,12 +151,15 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
             norm_cood: Normalise coordinates before computing OT loss.
             enforce_count: Rescale density map so its sum equals the CLS
                 count prediction.
+            dino_unfreeze_last_n: Number of trailing ViT transformer blocks to
+                unfreeze for fine-tuning.  0 (default) keeps the entire
+                backbone frozen.  Only applies to DINOv3 backbones.
         """
         super().__init__()
         self.backbone_name = backbone
 
         if "dino" in backbone.lower():
-            self._init_dino_backbone(backbone)
+            self._init_dino_backbone(backbone, dino_unfreeze_last_n)
         else:
             self._init_pvt_backbone(backbone, pretrained)
 
@@ -176,6 +180,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         self.count_cls_weight = count_cls_weight
         self.enforce_count = enforce_count
         self.norm_cood = norm_cood
+        self.dino_unfreeze_last_n = dino_unfreeze_last_n
 
         if losses is None:
             losses = ["count", "ot", "density_l1", "count_cls"]
@@ -252,7 +257,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         # PvT stride: the coarsest stage output (x3) is at stride 32.
         self.forward_stride = 32
 
-    def _init_dino_backbone(self, backbone: str) -> None:
+    def _init_dino_backbone(self, backbone: str, unfreeze_last_n: int = 0) -> None:
         """Set up DINOv3 ViT backbone, processor, and channel projections.
 
         ViTDet-style adapter: the final ``last_hidden_state`` is reshaped
@@ -270,6 +275,14 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
         self.backbone = AutoModel.from_pretrained(backbone)
         for param in self.backbone.parameters():
             param.requires_grad = False
+
+        if unfreeze_last_n > 0:
+            n_layers = self.backbone.config.num_hidden_layers
+            for i in range(max(0, n_layers - unfreeze_last_n), n_layers):
+                for param in self.backbone.layer[i].parameters():
+                    param.requires_grad = True
+            for param in self.backbone.norm.parameters():
+                param.requires_grad = True
 
         cfg = self.backbone.config
         hidden_size: int = cfg.hidden_size
@@ -361,6 +374,7 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
             "losses": self.losses,
             "norm_cood": self.norm_cood,
             "enforce_count": self.enforce_count,
+            "dino_unfreeze_last_n": self.dino_unfreeze_last_n,
             **self.kwargs,
         }
 
@@ -930,6 +944,7 @@ class Model(BaseModel):
                 norm_cood=cfg.norm_cood,
                 enforce_count=cfg.enforce_count,
                 backbone=cfg.backbone,
+                dino_unfreeze_last_n=cfg.dino_unfreeze_last_n,
                 **hf_args,
             )
 

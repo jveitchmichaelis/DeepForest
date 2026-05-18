@@ -1,0 +1,24 @@
+#!/bin/bash
+#SBATCH --job-name=Treeformer-dino
+#SBATCH --nodes=1
+#SBATCH --partition=hpg-b200
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=256GB
+#SBATCH --time=24:00:00
+#SBATCH --gpus=4
+#SBATCH --output=./slurm_logs/%A.out
+#SBATCH --error=./slurm_logs/%A.err
+#SBATCH --ntasks-per-node=4
+#SBATCH --signal=SIGUSR1@360
+
+printenv | grep -i slurm | sort
+
+export NCCL_IB_DISABLE=1
+export NCCL_NVLS_ENABLE=0
+export NCCL_DEBUG=INFO
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+
+CONFIG_NAME=treeformer_neon_dino
+export COMET_PROJECT="treeformer-deepforest"
+
+srun --kill-on-bad-exit=1 uv run deepforest --config-name="${CONFIG_NAME}" train --comet --verbose --export-hf --tag treeformer --tag dino --strategy ddp_find_unused_parameters_true --slurm-auto-requeue "$@"

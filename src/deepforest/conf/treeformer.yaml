@@ -64,6 +64,7 @@ validation:
     distance_threshold: 10
 
 keypoint:
+    backbone: OpenGVLab/pvt_v2_b3
     density_sigma: 3.0
     mae_weight: 1.0
     count_cls_weight: 0.1
@@ -75,3 +76,4 @@ keypoint:
     losses: [count, count_cls, ot, density_l1]
     norm_cood: true
     enforce_count: true
+    dino_unfreeze_last_n: 0
