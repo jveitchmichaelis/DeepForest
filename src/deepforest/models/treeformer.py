@@ -278,8 +278,15 @@ class TreeFormerModel(nn.Module, PyTorchModelHubMixin):
 
         if unfreeze_last_n > 0:
             n_layers = self.backbone.config.num_hidden_layers
+            # transformers >=5.5 wraps the layer list under `.model` (DINOv3ViTEncoder);
+            # earlier versions expose it directly on the model. `.norm` is unchanged.
+            blocks = (
+                self.backbone.model.layer
+                if hasattr(self.backbone, "model")
+                else self.backbone.layer
+            )
             for i in range(max(0, n_layers - unfreeze_last_n), n_layers):
-                for param in self.backbone.layer[i].parameters():
+                for param in blocks[i].parameters():
                     param.requires_grad = True
             for param in self.backbone.norm.parameters():
                 param.requires_grad = True
