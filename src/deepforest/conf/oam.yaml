@@ -1,0 +1,16 @@
+# OAM-TCD (restor/tcd) dataset config for Mask R-CNN
+
+defaults:
+    - polygon
+    - _self_
+
+train:
+    csv_file: data/tcd/train.json
+    root_dir: data/tcd/train/images
+    augmentations:
+        - RandomCrop: {size: [1024, 1024]}
+
+validation:
+    csv_file: data/tcd/test.json
+    root_dir: data/tcd/test/images
+

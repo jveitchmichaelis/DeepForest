@@ -665,6 +665,12 @@ class PolygonDataset(TrainingDataset):
                 if not poly.is_empty:
                     coords = np.array(poly.exterior.coords, dtype=np.int32)
                     cv2.fillPoly(mask, [coords], color=1)
+        elif geom.geom_type == "GeometryCollection":
+            # unary_union of touching polygons can produce a GeometryCollection
+            for sub in geom.geoms:
+                if sub.geom_type == "Polygon" and not sub.is_empty:
+                    coords = np.array(sub.exterior.coords, dtype=np.int32)
+                    cv2.fillPoly(mask, [coords], color=1)
 
         return mask
 
@@ -722,7 +728,6 @@ class PolygonDataset(TrainingDataset):
             labels = np.zeros(0, dtype=np.int64)
             geometries = []
 
-        # Rasterize each polygon into a binary instance mask
         if len(geometries) > 0:
             masks = np.stack(
                 [self.generate_mask(geom, width, height) for geom in geometries]
@@ -730,7 +735,6 @@ class PolygonDataset(TrainingDataset):
         else:
             masks = np.zeros((0, height, width), dtype=np.uint8)
 
-        # Apply augmentations jointly to image, boxes and masks
         image_tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float()
         boxes_tensor = torch.from_numpy(boxes).unsqueeze(0).float()
         masks_tensor = torch.from_numpy(masks).unsqueeze(0).float()

@@ -34,7 +34,7 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         label_dict: dict = None,
         **kwargs,
     ):
-        backbone = torchvision.models.detection.maskrcnn_resnet50_fpn(
+        backbone = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(
             weights=backbone_weights
         ).backbone
 

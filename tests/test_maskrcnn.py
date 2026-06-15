@@ -43,8 +43,11 @@ def test_predict_outputs_masks():
 
     assert len(predictions) == 2
     assert sorted(predictions[0].keys()) == ["boxes", "labels", "masks", "scores"]
+    n = len(predictions[0]["labels"])
+    # Masks are (N, 1, H, W) float logits before binarisation
+    assert predictions[0]["masks"].shape == (n, 1, 300, 400)
     # Labels are shifted back to the zero-indexed DeepForest convention
-    if len(predictions[0]["labels"]) > 0:
+    if n > 0:
         assert predictions[0]["labels"].min() >= 0
 
 
@@ -68,14 +71,6 @@ def test_training_label_shift_does_not_mutate_targets():
     assert targets[0]["labels"].tolist() == [0]
 
 
-def test_check_model():
-    model = maskrcnn.MaskRCNN(backbone_weights=None, num_classes=1)
-    model.eval()
-    x = [torch.rand(3, 300, 400), torch.rand(3, 500, 400)]
-    predictions = model(x)
-    assert sorted(predictions[1].keys()) == ["boxes", "labels", "masks", "scores"]
-
-
 def _make_polygon_model(tmp_path, polygon_annotation_file, polygon_root_dir):
     model = build_model(score_thresh=0.0)
     m = main.deepforest(
@@ -94,9 +89,7 @@ def _make_polygon_model(tmp_path, polygon_annotation_file, polygon_root_dir):
     return m
 
 
-def test_polygon_train_and_validate(
-    tmp_path, polygon_annotation_file, polygon_root_dir
-):
+def test_polygon_train_and_validate(tmp_path, polygon_annotation_file, polygon_root_dir):
     m = _make_polygon_model(tmp_path, polygon_annotation_file, polygon_root_dir)
     assert m.model.task == "polygon"
 
@@ -108,7 +101,7 @@ def test_polygon_train_and_validate(
     assert any("polygon" in key for key in logged) or "map" in logged
 
 
-def test_polygon_predict_image(polygon_root_dir):
+def test_polygon_predict_image_synthetic(polygon_root_dir):
     model = build_model(score_thresh=0.0)
     m = main.deepforest(
         model=model,
@@ -116,9 +109,9 @@ def test_polygon_predict_image(polygon_root_dir):
     )
     m.set_labels({"tree": 0})
 
-    image = np.array(
-        torch.randint(0, 255, (200, 200, 3), dtype=torch.uint8)
-    ).astype("float32")
+    image = np.array(torch.randint(0, 255, (200, 200, 3), dtype=torch.uint8)).astype(
+        "float32"
+    )
     result = m.predict_image(image=image)
 
     # Random weights may or may not produce detections; if they do, they must
@@ -139,9 +132,9 @@ def test_polygon_predict_tile():
     )
     m.set_labels({"tree": 0})
 
-    image = np.array(
-        torch.randint(0, 255, (150, 150, 3), dtype=torch.uint8)
-    ).astype("float32")
+    image = np.array(torch.randint(0, 255, (150, 150, 3), dtype=torch.uint8)).astype(
+        "float32"
+    )
     result = m.predict_tile(
         image=image, patch_size=100, patch_overlap=0.25, dataloader_strategy="single"
     )

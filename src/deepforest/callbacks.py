@@ -90,7 +90,7 @@ class ImagesCallback(Callback):
         n_samples = min(self.dataset_samples, len(dataset))
         sample_indices = torch.randperm(len(dataset))[:n_samples]
 
-        sample_data = [dataset[idx] for idx in sample_indices]
+        sample_data = [dataset[int(idx)] for idx in sample_indices]
         sample_images = [data[0] for data in sample_data]
         sample_targets = [data[1] for data in sample_data]
         sample_paths = [data[2] for data in sample_data]
@@ -138,6 +138,9 @@ class ImagesCallback(Callback):
             df = pd.concat(pl_module.predictions)
         else:
             df = pd.DataFrame()
+
+        if df.empty or "image_path" not in df.columns:
+            return
 
         out_dir = os.path.join(self.savedir, "predictions")
         os.makedirs(out_dir, exist_ok=True)

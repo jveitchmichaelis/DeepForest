@@ -117,7 +117,7 @@ class deepforest(pl.LightningModule):
                 task=self.model.task,
             )
 
-        # Segmentation metrics
+        # Instance segmentation metrics
         elif self.model.task == "polygon":
             self.mAP_metric = MeanAveragePrecision(
                 iou_type="segm", backend="faster_coco_eval"
@@ -365,6 +365,9 @@ class deepforest(pl.LightningModule):
         Returns:
             ds: a pytorch dataset
         """
+        csv_file = os.path.expanduser(csv_file) if csv_file else csv_file
+        root_dir = os.path.expanduser(root_dir) if root_dir else root_dir
+
         if self.model.task == "box":
             ds = training.BoxDataset(
                 csv_file=csv_file,
@@ -808,8 +811,7 @@ class deepforest(pl.LightningModule):
             preds = self.model.forward(images, targets)
 
         # Compute precision, recall and empty frame metrics.
-        if self.model.task in ("box", "point", "polygon"):
-            self.precision_recall_metric.update(preds, targets, image_names)
+        self.precision_recall_metric.update(preds, targets, image_names)
 
         if self.model.task == "box":
             # Filter out empty frames for IoU/mAP metrics. pred + target
@@ -905,7 +907,7 @@ class deepforest(pl.LightningModule):
             metrics.update(self.precision_recall_metric.compute())
 
         elif self.model.task == "polygon":
-            # Segmentation mAP, only when non-empty ground truth was seen
+            # Segmentation mAP guarded via PR metric (iou_metric is not used for polygons).
             n_non_empty = (
                 self.precision_recall_metric.num_images
                 - self.precision_recall_metric.num_empty_frames
@@ -1157,9 +1159,9 @@ class deepforest(pl.LightningModule):
             self.predictions = pd.concat(self.predictions, ignore_index=True)
             if "label" in self.predictions.columns:
                 self.predictions["label"] = self.predictions["label"].map(
-                    lambda x: self.numeric_to_label_dict.get(int(x), x)
-                    if pd.notna(x)
-                    else x
+                    lambda x: (
+                        self.numeric_to_label_dict.get(int(x), x) if pd.notna(x) else x
+                    )
                 )
         else:
             self.predictions = pd.DataFrame()
@@ -1167,7 +1169,6 @@ class deepforest(pl.LightningModule):
         results = {}
         results.update(self.trainer.logged_metrics)
         results["predictions"] = self.predictions
-        if self.model.task in ("box", "point", "polygon"):
-            results["results"] = self.precision_recall_metric.get_results()
+        results["results"] = self.precision_recall_metric.get_results()
 
         return results

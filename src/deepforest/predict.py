@@ -95,6 +95,26 @@ def translate_predictions(predictions: pd.DataFrame) -> pd.DataFrame:
     return predictions.drop(columns=["window_xmin", "window_ymin"]).reset_index(drop=True)
 
 
+def _apply_nms(
+    predictions: pd.DataFrame,
+    boxes: "torch.Tensor",
+    output_columns: list[str],
+    iou_threshold: float,
+) -> pd.DataFrame:
+    """Run torchvision NMS and return the surviving rows with selected columns."""
+    if predictions.shape[0] <= 1:
+        return predictions[output_columns].reset_index(drop=True).copy()
+
+    print(
+        f"{predictions.shape[0]} predictions in overlapping windows, applying non-max suppression"
+    )
+    scores = torch.tensor(predictions.score.values, dtype=torch.float32)
+    keep_idx = nms(boxes=boxes, scores=scores, iou_threshold=iou_threshold).numpy()
+    filtered = predictions.iloc[keep_idx].reset_index(drop=True)
+    print(f"{filtered.shape[0]} predictions kept after non-max suppression")
+    return filtered[output_columns].reset_index(drop=True).copy()
+
+
 def reduce_boxes(predictions: pd.DataFrame, iou_threshold: float) -> pd.DataFrame:
     """Reduce overlapping box predictions with torchvision NMS.
 
@@ -105,23 +125,11 @@ def reduce_boxes(predictions: pd.DataFrame, iou_threshold: float) -> pd.DataFram
     Returns:
         DataFrame containing the filtered box predictions in the public box schema.
     """
-    box_output_columns = ["xmin", "ymin", "xmax", "ymax", "label", "score"]
-    if predictions.shape[0] <= 1:
-        return predictions[box_output_columns].reset_index(drop=True).copy()
-
-    print(
-        f"{predictions.shape[0]} predictions in overlapping windows, applying non-max suppression"
-    )
-
+    output_columns = ["xmin", "ymin", "xmax", "ymax", "label", "score"]
     boxes = torch.tensor(
         predictions[["xmin", "ymin", "xmax", "ymax"]].values, dtype=torch.float32
     )
-    scores = torch.tensor(predictions.score.values, dtype=torch.float32)
-    keep_idx = nms(boxes=boxes, scores=scores, iou_threshold=iou_threshold).numpy()
-
-    filtered_predictions = predictions.iloc[keep_idx].reset_index(drop=True)
-    print(f"{filtered_predictions.shape[0]} predictions kept after non-max suppression")
-    return filtered_predictions[box_output_columns].reset_index(drop=True).copy()
+    return _apply_nms(predictions, boxes, output_columns, iou_threshold)
 
 
 def reduce_points(predictions: pd.DataFrame, nms_thresh: float) -> pd.DataFrame:
@@ -170,22 +178,11 @@ def reduce_polygons(predictions: pd.DataFrame, iou_threshold: float) -> pd.DataF
     Returns:
         DataFrame containing the filtered polygon predictions.
     """
-    polygon_output_columns = ["geometry", "label", "score"]
-    if predictions.shape[0] <= 1:
-        return predictions[polygon_output_columns].reset_index(drop=True).copy()
-
-    print(
-        f"{predictions.shape[0]} predictions in overlapping windows, applying non-max suppression"
+    output_columns = ["geometry", "label", "score"]
+    boxes = torch.tensor(
+        shapely.bounds(np.array(predictions.geometry)), dtype=torch.float32
     )
-
-    bounds = shapely.bounds(np.array(predictions.geometry))
-    boxes = torch.tensor(bounds, dtype=torch.float32)
-    scores = torch.tensor(predictions.score.values, dtype=torch.float32)
-    keep_idx = nms(boxes=boxes, scores=scores, iou_threshold=iou_threshold).numpy()
-
-    filtered_predictions = predictions.iloc[keep_idx].reset_index(drop=True)
-    print(f"{filtered_predictions.shape[0]} predictions kept after non-max suppression")
-    return filtered_predictions[polygon_output_columns].reset_index(drop=True).copy()
+    return _apply_nms(predictions, boxes, output_columns, iou_threshold)
 
 
 def mosaic(

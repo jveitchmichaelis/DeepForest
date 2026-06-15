@@ -559,6 +559,11 @@ def read_coco(json_file):
         segmentation = ann.get("segmentation")
 
         if not isinstance(segmentation, list):
+            warnings.warn(
+                f"Annotation id={ann.get('id')} uses RLE segmentation which is not "
+                "supported; skipping. Decode with pycocotools.mask first.",
+                stacklevel=2,
+            )
             continue
 
         poly_list = []

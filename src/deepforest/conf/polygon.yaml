@@ -1,0 +1,66 @@
+# General Mask R-CNN config for polygon/instance-segmentation.
+# Override train/validation paths and any hyperparameters in a dataset-specific yaml.
+# Example: deepforest --config-name my_dataset train  (where my_dataset.yaml has defaults: [polygon])
+
+architecture: maskrcnn
+batch_size: 1
+
+model:
+    name:
+    revision: main
+
+nms_thresh: 0.3
+score_thresh: 0.5
+detections_per_img: 500
+
+label_dict:
+    tree: 0
+num_classes: 1
+
+train:
+    csv_file:
+    root_dir:
+
+    lr: 0.0005
+    optimizer:
+        type: SGD
+        weight_decay: 0.0001
+        momentum: 0.9
+        betas: [0.9, 0.999]
+
+    augmentations:
+        - HorizontalFlip: {p: 0.5}
+        - VerticalFlip: {p: 0.5}
+
+    scheduler:
+        type:
+        params:
+            T_max: 10
+            eta_min: 0.00001
+            lr_lambda: "0.95 ** epoch"
+            step_size: 30
+            gamma: 0.1
+            milestones: [50, 100]
+            mode: min
+            factor: 0.1
+            patience: 10
+            threshold: 0.0001
+            threshold_mode: rel
+            cooldown: 0
+            min_lr: 0
+            eps: 0.00000001
+
+    epochs: 10
+    fast_dev_run: False
+    preload_images: False
+    validate_coordinates: False
+
+validation:
+    csv_file:
+    root_dir:
+    preload_images: False
+    validate_coordinates: False
+
+    lr_plateau_target: val_loss
+    iou_threshold: 0.4
+    val_accuracy_interval: 1
