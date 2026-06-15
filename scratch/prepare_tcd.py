@@ -22,7 +22,10 @@ import os
 from datasets import load_dataset
 
 
-CATEGORY = [{"id": 1, "name": "tree", "supercategory": "tree"}]
+CATEGORIES = [
+    {"id": 1, "name": "tree", "supercategory": "tree"},
+    {"id": 2, "name": "canopy", "supercategory": "tree"},
+]
 
 
 def export_split(ds_split, out_dir: str, n: int | None, split_name: str):
@@ -50,16 +53,13 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str):
 
         images_meta.append({"id": image_id, "file_name": fname, "height": height, "width": width})
 
-        # Parse per-image annotations; skip RLE-encoded crowd annotations (not supported).
         raw_anns = json.loads(row["coco_annotations"])
         for ann in raw_anns:
-            if not isinstance(ann.get("segmentation"), list):
-                continue
             ann_id_offset += 1
             entry = {
                 "id": ann_id_offset,
                 "image_id": image_id,
-                "category_id": 1,
+                "category_id": ann["category_id"],
                 "segmentation": ann["segmentation"],
                 "area": ann.get("area", 0),
                 "bbox": ann["bbox"],
@@ -73,7 +73,7 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str):
     coco_json = {
         "images": images_meta,
         "annotations": all_annotations,
-        "categories": CATEGORY,
+        "categories": CATEGORIES,
     }
 
     json_path = os.path.join(out_dir, f"{split_name}.json")

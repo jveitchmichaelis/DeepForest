@@ -559,32 +559,44 @@ def read_coco(json_file):
         segmentation = ann.get("segmentation")
 
         if not isinstance(segmentation, list):
-            warnings.warn(
-                f"Annotation id={ann.get('id')} uses RLE segmentation which is not "
-                "supported; skipping. Decode with pycocotools.mask first.",
-                stacklevel=2,
-            )
-            continue
+            # RLE segmentation — decode via pycocotools then trace contour
+            try:
+                import pycocotools.mask as mask_util
+            except ImportError as exc:
+                raise ImportError(
+                    "pycocotools is required to decode RLE segmentation annotations. "
+                    "Install it with: uv add pycocotools"
+                ) from exc
 
-        poly_list = []
+            rle = segmentation
+            # Compressed RLE has a string 'counts'; uncompressed has a list.
+            if isinstance(rle.get("counts"), list):
+                rle = mask_util.frPyObjects(rle, rle["size"][0], rle["size"][1])
+            mask = mask_util.decode(rle).astype(np.uint8)
+            merged_poly = mask_to_polygon(mask)
+        else:
+            poly_list = []
 
-        for seg in segmentation:
-            coords = list(zip(seg[::2], seg[1::2], strict=True))
+            for seg in segmentation:
+                coords = list(zip(seg[::2], seg[1::2], strict=True))
 
-            if len(coords) < 3:
+                if len(coords) < 3:
+                    continue
+
+                poly = shapely.geometry.Polygon(coords)
+
+                if poly.is_valid and not poly.is_empty:
+                    poly_list.append(poly)
+
+            if not poly_list:
                 continue
 
-            poly = shapely.geometry.Polygon(coords)
+            merged_poly = (
+                poly_list[0] if len(poly_list) == 1 else shapely.ops.unary_union(poly_list)
+            )
 
-            if poly.is_valid and not poly.is_empty:
-                poly_list.append(poly)
-
-        if not poly_list:
+        if merged_poly.is_empty:
             continue
-
-        merged_poly = (
-            poly_list[0] if len(poly_list) == 1 else shapely.ops.unary_union(poly_list)
-        )
 
         # Extract bbox
         xmin, ymin, w, h = ann["bbox"]
