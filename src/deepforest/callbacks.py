@@ -12,6 +12,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import shapely.geometry
 import supervision as sv
 import torch
 from PIL import Image
@@ -19,6 +20,59 @@ from pytorch_lightning import Callback
 
 from deepforest import utilities, visualize
 from deepforest.datasets.training import BoxDataset
+
+
+def _df_to_comet_annotations(
+    df: pd.DataFrame | None, layer_name: str, label_dict: dict | None = None
+) -> dict | None:
+    """Convert an annotation DataFrame to a Comet annotation layer.
+
+    Each row's shapely ``geometry`` becomes either a ``boxes`` entry (for
+    axis-aligned rectangles) or a ``points`` entry (flattened polygon
+    coordinates). Returns ``None`` when there is nothing to log so the
+    caller can drop empty layers.
+    """
+    if df is None or len(df) == 0 or "geometry" not in df.columns:
+        return None
+
+    inv_label = {idx: name for name, idx in label_dict.items()} if label_dict else None
+
+    items = []
+    for row in df.itertuples(index=False):
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+
+        label = getattr(row, "label", None)
+        if inv_label is not None and label in inv_label:
+            label = inv_label[label]
+        label = str(label) if label is not None else layer_name
+
+        entry: dict = {"label": label}
+        if hasattr(row, "score") and row.score is not None and not pd.isna(row.score):
+            entry["score"] = float(row.score) * 100.0
+
+        if isinstance(geom, shapely.geometry.MultiPolygon):
+            geom = max(geom.geoms, key=lambda g: g.area)
+
+        if isinstance(geom, shapely.geometry.Polygon):
+            xmin, ymin, xmax, ymax = geom.bounds
+            entry["boxes"] = [[float(xmin), float(ymin), float(xmax), float(ymax)]]
+            # Skip the polygon outline for axis-aligned rectangles to avoid
+            # double-rendering the box overlay.
+            if geom.area < geom.envelope.area:
+                coords = np.asarray(geom.exterior.coords, dtype=float)
+                if len(coords) >= 4:
+                    entry["points"] = [coords[:-1].flatten().tolist()]
+        else:
+            continue
+
+        items.append(entry)
+
+    if not items:
+        return None
+
+    return {"name": layer_name, "data": items}
 
 
 class ImagesCallback(Callback):
@@ -123,10 +177,17 @@ class ImagesCallback(Callback):
                 # Save un-annotated image
                 Image.fromarray(image).save(out_path)
 
+            label_dict = getattr(self.pl_module, "label_dict", None)
+            gt_layer = _df_to_comet_annotations(
+                image_annotations, "ground truth", label_dict=label_dict
+            )
+
             self._log_to_all(
                 image=out_path,
                 trainer=self.trainer,
                 tag=f"{split} dataset sample",
+                raw_image=image,
+                annotation_layers=[gt_layer] if gt_layer else None,
             )
 
     def _log_last_predictions(self, trainer, pl_module):
@@ -204,19 +265,50 @@ class ImagesCallback(Callback):
             with open(os.path.join(out_dir, basename + ".json"), "w") as fp:
                 json.dump(metadata, fp, indent=1)
 
+            label_dict = getattr(pl_module, "label_dict", None)
+            layers = []
+            gt_layer = _df_to_comet_annotations(
+                targets, "ground truth", label_dict=label_dict
+            )
+            if gt_layer is not None:
+                layers.append(gt_layer)
+            pred_layer = _df_to_comet_annotations(
+                pred_df, "predictions", label_dict=label_dict
+            )
+            if pred_layer is not None:
+                layers.append(pred_layer)
+
+            try:
+                raw_image = np.array(
+                    Image.open(os.path.join(dataset.root_dir, image_name)).convert("RGB")
+                )
+            except Exception:
+                raw_image = None
+
             self._log_to_all(
                 image=os.path.join(out_dir, basename + ".png"),
                 trainer=trainer,
                 tag="prediction sample",
                 metadata=metadata,
+                raw_image=raw_image,
+                annotation_layers=layers or None,
             )
 
-    def _log_to_all(self, image: str, trainer, tag, metadata: dict | None = None):
+    def _log_to_all(
+        self,
+        image: str,
+        trainer,
+        tag,
+        metadata: dict | None = None,
+        raw_image: np.ndarray | None = None,
+        annotation_layers: list[dict] | None = None,
+    ):
         """Log to all connected loggers.
 
-        Since Comet will pickup image logs to Tensorboard by default, we
-        add a check to log images preferentially to Tensorboard if both
-        are enabled.
+        TensorBoard receives the pre-rendered PNG so the matplotlib overlay
+        is visible inline. Comet receives the raw (unannotated) image with
+        ``annotations`` so boxes / polygons render as interactive native
+        overlays (see Comet's log_image annotations API).
         """
         try:
             img = np.array(Image.open(image).convert("RGB"))
@@ -247,11 +339,13 @@ class ImagesCallback(Callback):
                 if metadata:
                     meta.update(metadata)
 
+                comet_image = raw_image if raw_image is not None else img
                 comet.experiment.log_image(
-                    img,
+                    comet_image,
                     name=tag,
                     step=trainer.global_step,
                     metadata=meta,
+                    annotations=annotation_layers,
                 )
 
         except Exception as e:

@@ -330,14 +330,16 @@ def determine_geometry_type(df):
         columns = df.columns
         if "geometry" in columns:
             df = gpd.GeoDataFrame(geometry=df["geometry"])
-            geometry_type = df.geometry.type.unique()[0]
-            if geometry_type == "Polygon":
+            types = set(df.geometry.type.unique())
+            if types <= {"Polygon"}:
                 if (df.geometry.area == df.envelope.area).all():
                     return "box"
-                else:
-                    return "polygon"
-            else:
+                return "polygon"
+            if types <= {"Polygon", "MultiPolygon"}:
+                return "polygon"
+            if types <= {"Point"}:
                 return "point"
+            raise ValueError(f"Mixed/unsupported geometry types in DataFrame: {types}")
         elif (
             "xmin" in columns
             and "ymin" in columns

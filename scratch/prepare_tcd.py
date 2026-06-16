@@ -69,8 +69,8 @@ def clamp_segmentation(segmentation, width: int, height: int):
     for poly in segmentation:
         xs = [min(max(poly[i], 0), width) for i in range(0, len(poly), 2)]
         ys = [min(max(poly[i], 0), height) for i in range(1, len(poly), 2)]
-        flat = [v for pair in zip(xs, ys) for v in pair]
-        if len(set(zip(xs, ys))) >= 3:
+        flat = [v for pair in zip(xs, ys, strict=True) for v in pair]
+        if len(set(zip(xs, ys, strict=True))) >= 3:
             clamped.append(flat)
 
     return clamped if clamped else None
