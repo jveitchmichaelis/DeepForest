@@ -4,6 +4,8 @@ defaults:
     - polygon
     - _self_
 
+batch_size: 8
+
 label_dict:
     tree: 0
     canopy: 1

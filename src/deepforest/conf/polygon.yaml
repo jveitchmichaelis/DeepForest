@@ -53,13 +53,13 @@ train:
     epochs: 10
     fast_dev_run: False
     preload_images: False
-    validate_coordinates: False
+    validate_coordinates: True
 
 validation:
     csv_file:
     root_dir:
     preload_images: False
-    validate_coordinates: False
+    validate_coordinates: True
 
     lr_plateau_target: val_loss
     iou_threshold: 0.4

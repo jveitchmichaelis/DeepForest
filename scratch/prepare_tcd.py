@@ -28,7 +28,7 @@ CATEGORIES = [
 ]
 
 
-def export_split(ds_split, out_dir: str, n: int | None, split_name: str):
+def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_ids: list[int] | None = None):
     img_dir = os.path.join(out_dir, split_name, "images")
     os.makedirs(img_dir, exist_ok=True)
 
@@ -36,11 +36,16 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str):
     all_annotations = []
     ann_id_offset = 0
 
-    n_total = len(ds_split) if n is None else min(n, len(ds_split))
-    print(f"Exporting {n_total} images from '{split_name}' split...")
+    if image_ids is not None:
+        id_set = set(image_ids)
+        rows = [row for row in ds_split if int(row["image_id"]) in id_set]
+    else:
+        n_total = len(ds_split) if n is None else min(n, len(ds_split))
+        rows = [ds_split[i] for i in range(n_total)]
 
-    for i in range(n_total):
-        row = ds_split[i]
+    print(f"Exporting {len(rows)} images from '{split_name}' split...")
+
+    for row in rows:
         image_id = int(row["image_id"])
         height = int(row["height"])
         width = int(row["width"])
@@ -48,7 +53,7 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str):
         # Save image
         fname = f"{image_id}.tif"
         fpath = os.path.join(img_dir, fname)
-        if not os.path.exists(fpath):
+        if not os.path.exists(fpath) or image_ids is not None:
             row["image"].save(fpath)
 
         images_meta.append({"id": image_id, "file_name": fname, "height": height, "width": width})
@@ -67,8 +72,8 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str):
             }
             all_annotations.append(entry)
 
-        if (i + 1) % 10 == 0:
-            print(f"  {i + 1}/{n_total}")
+        if len(images_meta) % 10 == 0:
+            print(f"  {len(images_meta)}/{len(rows)}")
 
     coco_json = {
         "images": images_meta,
@@ -95,6 +100,8 @@ def main():
                         help="Number of training images to export (default: all 4169).")
     parser.add_argument("--n_test", type=int, default=None,
                         help="Number of test images to export (default: all 439).")
+    parser.add_argument("--image_ids", type=int, nargs="+", default=None,
+                        help="Export only these image IDs (from both splits). Overrides --n_train/--n_test.")
     args = parser.parse_args()
 
     out_dir = os.path.expanduser(args.out_dir)
@@ -102,8 +109,8 @@ def main():
     print("Loading restor/tcd from HuggingFace...")
     ds = load_dataset("restor/tcd", cache_dir=args.hf_cache_dir)
 
-    train_json, train_img_dir = export_split(ds["train"], out_dir, args.n_train, "train")
-    test_json, test_img_dir = export_split(ds["test"], out_dir, args.n_test, "test")
+    train_json, train_img_dir = export_split(ds["train"], out_dir, args.n_train, "train", image_ids=args.image_ids)
+    test_json, test_img_dir = export_split(ds["test"], out_dir, args.n_test, "test", image_ids=args.image_ids)
 
     print()
     print("Done. Paths match defaults in src/deepforest/conf/oam.yaml:")
