@@ -81,11 +81,15 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
 
     if image_ids is not None:
         id_set = set(image_ids)
-        rows = (row for row in ds_split if int(row["image_id"]) in id_set)
-        n_total = len(id_set)
+        ds_split = ds_split.filter(
+            lambda x: int(x["image_id"]) in id_set,
+            input_columns=["image_id"],
+        )
+        n_total = len(ds_split)
     else:
         n_total = len(ds_split) if n is None else min(n, len(ds_split))
-        rows = (ds_split[i] for i in range(n_total))
+        ds_split = ds_split.select(range(n_total))
+    rows = iter(ds_split)
 
     print(f"Exporting {n_total} images from '{split_name}' split...")
 
@@ -105,7 +109,7 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
         raw_anns = json.loads(row["coco_annotations"])
         for ann in raw_anns:
             seg = clamp_segmentation(ann["segmentation"], width, height)
-            if not seg:
+            if seg is None:
                 continue
             bbox = clamp_bbox(ann["bbox"], width, height)
             if bbox is None:
@@ -122,7 +126,7 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
             }
             all_annotations.append(entry)
 
-        if len(images_meta) % 10 == 0:
+        if len(images_meta) % 100 == 0:
             print(f"  {len(images_meta)}/{n_total}")
 
     coco_json = {
