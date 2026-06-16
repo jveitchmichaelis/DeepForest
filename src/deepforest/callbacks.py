@@ -52,16 +52,28 @@ def _df_to_comet_annotations(
         if hasattr(row, "score") and row.score is not None and not pd.isna(row.score):
             entry["score"] = float(row.score) * 100.0
 
-        if isinstance(geom, shapely.geometry.MultiPolygon):
-            geom = max(geom.geoms, key=lambda g: g.area)
-
-        if isinstance(geom, shapely.geometry.Polygon):
+        if isinstance(geom, shapely.geometry.Point):
+            # Render points as a small fixed-size marker box.
+            half = 5.0
+            entry["boxes"] = [
+                [float(geom.x) - half, float(geom.y) - half, 2 * half, 2 * half]
+            ]
+        elif isinstance(geom, shapely.geometry.Polygon | shapely.geometry.MultiPolygon):
+            # Take the bbox of the full geometry so MultiPolygons keep all components.
             xmin, ymin, xmax, ymax = geom.bounds
-            entry["boxes"] = [[float(xmin), float(ymin), float(xmax), float(ymax)]]
-            # Skip the polygon outline for axis-aligned rectangles to avoid
-            # double-rendering the box overlay.
-            if geom.area < geom.envelope.area:
-                coords = np.asarray(geom.exterior.coords, dtype=float)
+            entry["boxes"] = [
+                [float(xmin), float(ymin), float(xmax - xmin), float(ymax - ymin)]
+            ]
+            # For polygons, also emit the outline. Skip when it's exactly the
+            # bbox (axis-aligned rectangle) to avoid double-rendering.
+            # For MultiPolygons, use the largest piece's outline.
+            poly = (
+                max(geom.geoms, key=lambda g: g.area)
+                if isinstance(geom, shapely.geometry.MultiPolygon)
+                else geom
+            )
+            if poly.area < poly.envelope.area:
+                coords = np.asarray(poly.exterior.coords, dtype=float)
                 if len(coords) >= 4:
                     entry["points"] = [coords[:-1].flatten().tolist()]
         else:
@@ -339,13 +351,22 @@ class ImagesCallback(Callback):
                 if metadata:
                     meta.update(metadata)
 
-                comet_image = raw_image if raw_image is not None else img
+                # Native Comet annotations are in raw-image coordinates, so
+                # drop them if we have to fall back to the rendered PNG (which
+                # has matplotlib chrome and a different coord space).
+                if raw_image is not None:
+                    comet_image = raw_image
+                    annotations = annotation_layers
+                else:
+                    comet_image = img
+                    annotations = None
+
                 comet.experiment.log_image(
                     comet_image,
                     name=tag,
                     step=trainer.global_step,
                     metadata=meta,
-                    annotations=annotation_layers,
+                    annotations=annotations,
                 )
 
         except Exception as e:
