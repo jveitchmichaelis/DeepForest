@@ -38,12 +38,13 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
 
     if image_ids is not None:
         id_set = set(image_ids)
-        rows = [row for row in ds_split if int(row["image_id"]) in id_set]
+        rows = (row for row in ds_split if int(row["image_id"]) in id_set)
+        n_total = len(id_set)
     else:
         n_total = len(ds_split) if n is None else min(n, len(ds_split))
-        rows = [ds_split[i] for i in range(n_total)]
+        rows = (ds_split[i] for i in range(n_total))
 
-    print(f"Exporting {len(rows)} images from '{split_name}' split...")
+    print(f"Exporting {n_total} images from '{split_name}' split...")
 
     for row in rows:
         image_id = int(row["image_id"])
@@ -73,7 +74,7 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
             all_annotations.append(entry)
 
         if len(images_meta) % 10 == 0:
-            print(f"  {len(images_meta)}/{len(rows)}")
+            print(f"  {len(images_meta)}/{n_total}")
 
     coco_json = {
         "images": images_meta,
