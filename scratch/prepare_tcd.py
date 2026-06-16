@@ -22,6 +22,49 @@ import os
 from datasets import load_dataset
 
 
+def clamp_segmentation(segmentation, width: int, height: int):
+    """Clamp polygon vertices to image bounds and drop degenerate polygons.
+
+    Args:
+        segmentation: COCO segmentation field — either a list of flat
+            coordinate lists ``[[x1,y1,x2,y2,...], ...]`` or an RLE dict.
+        width: Image width in pixels.
+        height: Image height in pixels.
+
+    Returns:
+        Clamped segmentation in the same format, or None if all polygons
+        became degenerate after clamping.
+    """
+    if not isinstance(segmentation, list):
+        return segmentation  # RLE — already a raster mask, nothing to clamp
+
+    clamped = []
+    for poly in segmentation:
+        xs = [min(max(poly[i], 0), width) for i in range(0, len(poly), 2)]
+        ys = [min(max(poly[i], 0), height) for i in range(1, len(poly), 2)]
+        flat = [v for pair in zip(xs, ys) for v in pair]
+        if len(set(zip(xs, ys))) >= 3:
+            clamped.append(flat)
+
+    return clamped if clamped else None
+
+
+def clamp_bbox(bbox, width: int, height: int):
+    """Clamp a COCO bbox [x, y, w, h] to image bounds.
+
+    Returns:
+        Clamped [x, y, w, h], or None if the box has no area after clamping.
+    """
+    x, y, w, h = bbox
+    x1 = min(max(x, 0), width)
+    y1 = min(max(y, 0), height)
+    x2 = min(max(x + w, 0), width)
+    y2 = min(max(y + h, 0), height)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return [x1, y1, x2 - x1, y2 - y1]
+
+
 CATEGORIES = [
     {"id": 1, "name": "tree", "supercategory": "tree"},
     {"id": 2, "name": "canopy", "supercategory": "tree"},
@@ -61,14 +104,20 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
 
         raw_anns = json.loads(row["coco_annotations"])
         for ann in raw_anns:
+            seg = clamp_segmentation(ann["segmentation"], width, height)
+            if not seg:
+                continue
+            bbox = clamp_bbox(ann["bbox"], width, height)
+            if bbox is None:
+                continue
             ann_id_offset += 1
             entry = {
                 "id": ann_id_offset,
                 "image_id": image_id,
                 "category_id": ann["category_id"],
-                "segmentation": ann["segmentation"],
+                "segmentation": seg,
                 "area": ann.get("area", 0),
-                "bbox": ann["bbox"],
+                "bbox": bbox,
                 "iscrowd": 0,
             }
             all_annotations.append(entry)
