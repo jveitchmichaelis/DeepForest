@@ -20,6 +20,33 @@ import json
 import os
 
 from datasets import load_dataset
+from PIL import Image
+
+
+def _verify_tif(path: str) -> bool:
+    """Open with the same call training uses; return True iff it succeeds."""
+    try:
+        with Image.open(path) as im:
+            im.convert("RGB").load()
+        return True
+    except Exception:
+        return False
+
+
+def _save_tif_atomic(pil_image, fpath: str, image_id: int) -> None:
+    """Save a PIL image to fpath as TIFF, verify, then atomically rename.
+
+    Raises RuntimeError if the saved file fails to roundtrip through PIL.
+    """
+    tmp_path = fpath + ".tmp"
+    pil_image.convert("RGB").save(tmp_path, format="TIFF")
+    if not _verify_tif(tmp_path):
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise RuntimeError(f"Saved TIF for image_id={image_id} failed verification: {fpath}")
+    os.replace(tmp_path, fpath)
 
 
 def clamp_segmentation(segmentation, width: int, height: int):
@@ -71,13 +98,22 @@ CATEGORIES = [
 ]
 
 
-def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_ids: list[int] | None = None):
+def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_ids: list[int] | None = None, overwrite: bool = False):
     img_dir = os.path.join(out_dir, split_name, "images")
     os.makedirs(img_dir, exist_ok=True)
 
     images_meta = []
     all_annotations = []
-    ann_id_offset = 0
+    category_ids_seen: set[int] = set()
+
+    json_path = os.path.join(out_dir, f"{split_name}.json")
+    existing = None
+    if image_ids is not None and os.path.exists(json_path):
+        with open(json_path) as f:
+            existing = json.load(f)
+        ann_id_offset = max((a["id"] for a in existing["annotations"]), default=0)
+    else:
+        ann_id_offset = 0
 
     if image_ids is not None:
         id_set = set(image_ids)
@@ -98,11 +134,14 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
         height = int(row["height"])
         width = int(row["width"])
 
-        # Save image
+        # Save image (atomic + verified). On re-runs without --image_ids, re-verify
+        # the existing file and re-save if it's unreadable, so previously-corrupt
+        # files self-heal instead of being skipped forever.
         fname = f"{image_id}.tif"
         fpath = os.path.join(img_dir, fname)
-        if not os.path.exists(fpath) or image_ids is not None:
-            row["image"].save(fpath)
+        needs_save = overwrite or image_ids is not None or not os.path.exists(fpath) or not _verify_tif(fpath)
+        if needs_save:
+            _save_tif_atomic(row["image"], fpath, image_id)
 
         images_meta.append({"id": image_id, "file_name": fname, "height": height, "width": width})
 
@@ -115,6 +154,7 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
             if bbox is None:
                 continue
             ann_id_offset += 1
+            category_ids_seen.add(int(ann["category_id"]))
             entry = {
                 "id": ann_id_offset,
                 "image_id": image_id,
@@ -129,13 +169,33 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
         if len(images_meta) % 100 == 0:
             print(f"  {len(images_meta)}/{n_total}")
 
-    coco_json = {
-        "images": images_meta,
-        "annotations": all_annotations,
-        "categories": CATEGORIES,
-    }
+    valid_category_ids = {c["id"] for c in CATEGORIES}
+    unexpected = category_ids_seen - valid_category_ids
+    assert not unexpected, (
+        f"Unexpected category_ids in '{split_name}' annotations: {unexpected}. "
+        f"CATEGORIES declares {valid_category_ids}."
+    )
 
-    json_path = os.path.join(out_dir, f"{split_name}.json")
+    if existing is not None:
+        # Replace-by-image: drop any prior anns whose image we just re-exported,
+        # then append the new ones. Same for images_meta. New ann IDs were
+        # already offset above max(existing) so they can't collide.
+        touched_image_ids = {img["id"] for img in images_meta}
+        existing["images"] = [
+            img for img in existing["images"] if img["id"] not in touched_image_ids
+        ] + images_meta
+        existing["annotations"] = [
+            ann for ann in existing["annotations"] if ann["image_id"] not in touched_image_ids
+        ] + all_annotations
+        existing["categories"] = CATEGORIES
+        coco_json = existing
+    else:
+        coco_json = {
+            "images": images_meta,
+            "annotations": all_annotations,
+            "categories": CATEGORIES,
+        }
+
     with open(json_path, "w") as f:
         json.dump(coco_json, f)
 
@@ -156,6 +216,9 @@ def main():
                         help="Number of test images to export (default: all 439).")
     parser.add_argument("--image_ids", type=int, nargs="+", default=None,
                         help="Export only these image IDs (from both splits). Overrides --n_train/--n_test.")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Re-save every TIF even if it already exists and verifies. "
+                             "Use to force a clean rewrite after a corruption incident.")
     args = parser.parse_args()
 
     out_dir = os.path.expanduser(args.out_dir)
@@ -163,8 +226,8 @@ def main():
     print("Loading restor/tcd from HuggingFace...")
     ds = load_dataset("restor/tcd", cache_dir=args.hf_cache_dir)
 
-    train_json, train_img_dir = export_split(ds["train"], out_dir, args.n_train, "train", image_ids=args.image_ids)
-    test_json, test_img_dir = export_split(ds["test"], out_dir, args.n_test, "test", image_ids=args.image_ids)
+    train_json, train_img_dir = export_split(ds["train"], out_dir, args.n_train, "train", image_ids=args.image_ids, overwrite=args.overwrite)
+    test_json, test_img_dir = export_split(ds["test"], out_dir, args.n_test, "test", image_ids=args.image_ids, overwrite=args.overwrite)
 
     print()
     print("Done. Paths match defaults in src/deepforest/conf/oam.yaml:")
