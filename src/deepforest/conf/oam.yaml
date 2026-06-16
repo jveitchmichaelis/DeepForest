@@ -14,6 +14,7 @@ num_classes: 2
 train:
     csv_file: data/tcd/train.json
     root_dir: data/tcd/train/images
+    lr: 0.002
     augmentations:
         - RandomCrop: {size: [1024, 1024]}
 
