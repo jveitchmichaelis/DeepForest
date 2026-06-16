@@ -82,7 +82,7 @@ def export_split(ds_split, out_dir: str, n: int | None, split_name: str, image_i
     if image_ids is not None:
         id_set = set(image_ids)
         ds_split = ds_split.filter(
-            lambda x: int(x["image_id"]) in id_set,
+            lambda x: int(x) in id_set,
             input_columns=["image_id"],
         )
         n_total = len(ds_split)
