@@ -2,13 +2,71 @@ import warnings
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 import torchvision
 from huggingface_hub import PyTorchModelHubMixin
+from torchvision.models.detection import roi_heads as _rh
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNN as _TorchvisionMaskRCNN
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 
 from deepforest.model import BaseModel
+
+# Module-global class weights for the Fast R-CNN classifier. Set via
+# set_loss_class_weights(); when None, the original torchvision loss runs.
+_CLASS_WEIGHTS: torch.Tensor | None = None
+_ORIG_FASTRCNN_LOSS = _rh.fastrcnn_loss
+
+
+def _weighted_fastrcnn_loss(class_logits, box_regression, labels, regression_targets):
+    """Monkey-patched replacement for torchvision.models.detection.roi_heads.fastrcnn_loss.
+
+    Identical to the original except the classification CE is weighted by
+    ``_CLASS_WEIGHTS`` when set. The box regression loss is untouched.
+    """
+    if _CLASS_WEIGHTS is None:
+        return _ORIG_FASTRCNN_LOSS(class_logits, box_regression, labels, regression_targets)
+
+    labels_cat = torch.cat(labels, dim=0)
+    regression_targets_cat = torch.cat(regression_targets, dim=0)
+
+    weights = _CLASS_WEIGHTS.to(class_logits.device, dtype=class_logits.dtype)
+    classification_loss = F.cross_entropy(class_logits, labels_cat, weight=weights)
+
+    sampled_pos_inds_subset = torch.where(labels_cat > 0)[0]
+    labels_pos = labels_cat[sampled_pos_inds_subset]
+    N, _ = class_logits.shape
+    box_regression_r = box_regression.reshape(N, box_regression.size(-1) // 4, 4)
+    box_loss = F.smooth_l1_loss(
+        box_regression_r[sampled_pos_inds_subset, labels_pos],
+        regression_targets_cat[sampled_pos_inds_subset],
+        beta=1 / 9,
+        reduction="sum",
+    ) / labels_cat.numel()
+
+    return classification_loss, box_loss
+
+
+_rh.fastrcnn_loss = _weighted_fastrcnn_loss
+
+
+def set_loss_class_weights(weights: list[float] | torch.Tensor | None) -> None:
+    """Set the per-class weights used by Fast R-CNN's classification CE.
+
+    Args:
+        weights: Tensor or list of length ``num_classes + 1`` where index 0
+            is background. Pass ``None`` to disable weighting.
+    """
+    global _CLASS_WEIGHTS
+    if weights is None:
+        _CLASS_WEIGHTS = None
+    else:
+        _CLASS_WEIGHTS = torch.as_tensor(weights, dtype=torch.float32)
+
+
+def clear_loss_class_weights() -> None:
+    """Disable Fast R-CNN classifier CE weighting (restores torchvision default)."""
+    set_loss_class_weights(None)
 
 
 class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
@@ -54,6 +112,19 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         self.kwargs = kwargs
 
         self.update_config()
+
+    def apply_class_balanced_loss(self, annotations, label_dict: dict[str, int]) -> None:
+        """Enable inverse-frequency classifier-CE weighting from train annotations.
+
+        Args:
+            annotations: DataFrame with a ``label`` column (e.g. produced by
+                ``utilities.read_file``).
+            label_dict: Mapping of string label → zero-indexed foreground id.
+        """
+        from deepforest.datasets.sampling import compute_class_loss_weights
+
+        weights = compute_class_loss_weights(annotations, label_dict, self.num_classes)
+        set_loss_class_weights(weights)
 
     @classmethod
     def from_pretrained(

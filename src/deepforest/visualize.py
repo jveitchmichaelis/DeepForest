@@ -225,7 +225,7 @@ def convert_to_sv_format(
         polygons = [np.array(p).round().astype(np.int32) for p in polygons]
         # cv2.fillPoly requires at least 3 points; skip degenerate polygons
         valid = [len(p) >= 3 for p in polygons]
-        polygons = [p for p, ok in zip(polygons, valid) if ok]
+        polygons = [p for p, ok in zip(polygons, valid, strict=True) if ok]
         boxes = boxes[valid]
         labels = labels[valid]
         scores = scores[valid]

@@ -346,6 +346,7 @@ class deepforest(pl.LightningModule):
         preload_images=False,
         validate_coordinates=True,
         batch_size=1,
+        sampler=None,
     ):
         """Create a dataset for inference or training.
 
@@ -411,7 +412,8 @@ class deepforest(pl.LightningModule):
         data_loader = torch.utils.data.DataLoader(
             ds,
             batch_size=batch_size,
-            shuffle=shuffle,
+            shuffle=False if sampler is not None else shuffle,
+            sampler=sampler,
             collate_fn=ds.collate_fn,
             num_workers=self.config.workers,
         )
@@ -427,6 +429,27 @@ class deepforest(pl.LightningModule):
         if self.existing_train_dataloader:
             return self.existing_train_dataloader
 
+        sampler = None
+        balance_sampler = self.config.train.class_balanced_sampler
+        balance_loss = self.config.train.class_balanced_loss
+
+        if balance_sampler or balance_loss:
+            from deepforest.datasets.sampling import build_class_balanced_sampler
+
+            ann = utilities.read_file(
+                self.config.train.csv_file, root_dir=self.config.train.root_dir
+            )
+            if balance_sampler:
+                sampler = build_class_balanced_sampler(ann)
+            if balance_loss:
+                if hasattr(self.model, "apply_class_balanced_loss"):
+                    self.model.apply_class_balanced_loss(ann, self.label_dict)
+                else:
+                    warnings.warn(
+                        f"class_balanced_loss is not supported by {type(self.model).__name__}; ignoring.",
+                        stacklevel=2,
+                    )
+
         loader = self.load_dataset(
             csv_file=self.config.train.csv_file,
             root_dir=self.config.train.root_dir,
@@ -436,6 +459,7 @@ class deepforest(pl.LightningModule):
             shuffle=True,
             transforms=self.transforms,
             batch_size=self.config.batch_size,
+            sampler=sampler,
         )
 
         return loader

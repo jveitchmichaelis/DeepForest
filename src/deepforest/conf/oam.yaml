@@ -4,7 +4,7 @@ defaults:
     - polygon
     - _self_
 
-batch_size: 8
+batch_size: 16
 
 label_dict:
     tree: 0
@@ -15,8 +15,18 @@ train:
     csv_file: data/tcd/train.json
     root_dir: data/tcd/train/images
     lr: 0.002
+    scheduler:
+        type: cosine
+        params:
+            T_max: 10
+            eta_min: 0.00002
+    class_balanced_sampler: true
+    class_balanced_loss: false
     augmentations:
-        - RandomCrop: {size: [1024, 1024]}
+        - HorizontalFlip: {p: 0.5}
+        - VerticalFlip: {p: 0.5}
+        - RandomResizedCrop: {size: [1024, 1024], scale: [0.7, 1.0], ratio: [1.0, 1.0], p: 1.0}
+        - RandomBrightnessContrast: {brightness: 0.2, contrast: 0.2, p: 0.5}
 
 validation:
     csv_file: data/tcd/test.json
