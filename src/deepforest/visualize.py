@@ -159,7 +159,7 @@ def convert_to_sv_format(
         ).values
         boxes = np.stack(boxes)
 
-        label_mapping = {label: idx for idx, label in enumerate(df["label"].unique())}
+        label_mapping = {label: idx for idx, label in enumerate(sorted(df["label"].unique()))}
 
         # Extract labels as a numpy array
         labels = df["label"].map(label_mapping).values.astype(int)
@@ -187,7 +187,7 @@ def convert_to_sv_format(
         ).values
         boxes = np.stack(boxes)
 
-        label_mapping = {label: idx for idx, label in enumerate(df["label"].unique())}
+        label_mapping = {label: idx for idx, label in enumerate(sorted(df["label"].unique()))}
 
         # Extract labels as a numpy array
         labels = df["label"].map(label_mapping).values.astype(int)
@@ -249,7 +249,7 @@ def convert_to_sv_format(
         points = np.stack(points)
         points = np.expand_dims(points, axis=1)
 
-        label_mapping = {label: idx for idx, label in enumerate(df["label"].unique())}
+        label_mapping = {label: idx for idx, label in enumerate(sorted(df["label"].unique()))}
 
         # Extract labels as a numpy array
         labels = df["label"].map(label_mapping).values.astype(int)

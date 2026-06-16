@@ -93,8 +93,8 @@ def clamp_bbox(bbox, width: int, height: int):
 
 
 CATEGORIES = [
-    {"id": 1, "name": "tree", "supercategory": "tree"},
-    {"id": 2, "name": "canopy", "supercategory": "tree"},
+    {"id": 1, "name": "canopy", "supercategory": "tree"},
+    {"id": 2, "name": "tree", "supercategory": "tree"},
 ]
 
 
