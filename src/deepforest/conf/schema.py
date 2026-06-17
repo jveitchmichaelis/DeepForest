@@ -144,6 +144,21 @@ class PointConfig:
 
 
 @dataclass
+class MaskRCNNConfig:
+    """Mask R-CNN specific knobs not shared with other architectures.
+
+    ``trainable_backbone_layers`` follows the torchvision convention: 0
+    freezes the whole backbone, 5 trains all of it. ``=3`` is the
+    closest analog to Detectron2's ``FREEZE_AT: 2`` used in the OAM-TCD
+    paper (freezes stem + layer1).
+    """
+
+    trainable_backbone_layers: int | None = None
+    rpn_pre_nms_top_n_test: int = 1000
+    rpn_post_nms_top_n_test: int = 1000
+
+
+@dataclass
 class Config:
     """General DeepForest configuration.
 
@@ -180,6 +195,8 @@ class Config:
     topk_candidates: int = 1000
     model: ModelConfig = field(default_factory=ModelConfig)
 
+    gradient_clip_val: float | None = 0.5
+
     log_root: str = "./lightning_logs"
 
     # Preprocessing
@@ -195,3 +212,4 @@ class Config:
     predict: PredictConfig = field(default_factory=PredictConfig)
     cropmodel: CropModelConfig = field(default_factory=CropModelConfig)
     point: PointConfig = field(default_factory=PointConfig)
+    maskrcnn: MaskRCNNConfig = field(default_factory=MaskRCNNConfig)

@@ -25,7 +25,9 @@ def _weighted_fastrcnn_loss(class_logits, box_regression, labels, regression_tar
     ``_CLASS_WEIGHTS`` when set. The box regression loss is untouched.
     """
     if _CLASS_WEIGHTS is None:
-        return _ORIG_FASTRCNN_LOSS(class_logits, box_regression, labels, regression_targets)
+        return _ORIG_FASTRCNN_LOSS(
+            class_logits, box_regression, labels, regression_targets
+        )
 
     labels_cat = torch.cat(labels, dim=0)
     regression_targets_cat = torch.cat(regression_targets, dim=0)
@@ -37,12 +39,15 @@ def _weighted_fastrcnn_loss(class_logits, box_regression, labels, regression_tar
     labels_pos = labels_cat[sampled_pos_inds_subset]
     N, _ = class_logits.shape
     box_regression_r = box_regression.reshape(N, box_regression.size(-1) // 4, 4)
-    box_loss = F.smooth_l1_loss(
-        box_regression_r[sampled_pos_inds_subset, labels_pos],
-        regression_targets_cat[sampled_pos_inds_subset],
-        beta=1 / 9,
-        reduction="sum",
-    ) / labels_cat.numel()
+    box_loss = (
+        F.smooth_l1_loss(
+            box_regression_r[sampled_pos_inds_subset, labels_pos],
+            regression_targets_cat[sampled_pos_inds_subset],
+            beta=1 / 9,
+            reduction="sum",
+        )
+        / labels_cat.numel()
+    )
 
     return classification_loss, box_loss
 
@@ -90,10 +95,14 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         nms_thresh: float = 0.05,
         score_thresh: float = 0.5,
         label_dict: dict = None,
+        trainable_backbone_layers: int | None = None,
         **kwargs,
     ):
+        backbone_kwargs = {"weights": backbone_weights}
+        if trainable_backbone_layers is not None:
+            backbone_kwargs["trainable_backbone_layers"] = trainable_backbone_layers
         backbone = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(
-            weights=backbone_weights
+            **backbone_kwargs
         ).backbone
 
         # torchvision reserves class 0 for background, so add one class.
@@ -109,6 +118,7 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         self.label_dict = label_dict
         self.nms_thresh = nms_thresh
         self.score_thresh = score_thresh
+        self.trainable_backbone_layers = trainable_backbone_layers
         self.kwargs = kwargs
 
         self.update_config()
@@ -183,6 +193,7 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
             "nms_thresh": self.nms_thresh,
             "score_thresh": self.score_thresh,
             "label_dict": self.label_dict,
+            "trainable_backbone_layers": self.trainable_backbone_layers,
             **self.kwargs,
         }
 
@@ -235,6 +246,7 @@ class Model(BaseModel):
             model: a pytorch nn module
         """
         label_dict = dict(self.config.label_dict) if self.config.label_dict else None
+        mrcnn = self.config.maskrcnn
 
         if pretrained is None:
             model = MaskRCNN(
@@ -243,7 +255,10 @@ class Model(BaseModel):
                 nms_thresh=self.config.nms_thresh,
                 score_thresh=self.config.score_thresh,
                 label_dict=label_dict,
+                trainable_backbone_layers=mrcnn.trainable_backbone_layers,
                 box_detections_per_img=self.config.detections_per_img,
+                rpn_pre_nms_top_n_test=mrcnn.rpn_pre_nms_top_n_test,
+                rpn_post_nms_top_n_test=mrcnn.rpn_post_nms_top_n_test,
             )
         else:
             model = MaskRCNN.from_pretrained(
@@ -253,7 +268,10 @@ class Model(BaseModel):
                 label_dict=label_dict,
                 nms_thresh=self.config.nms_thresh,
                 score_thresh=self.config.score_thresh,
+                trainable_backbone_layers=mrcnn.trainable_backbone_layers,
                 box_detections_per_img=self.config.detections_per_img,
+                rpn_pre_nms_top_n_test=mrcnn.rpn_pre_nms_top_n_test,
+                rpn_post_nms_top_n_test=mrcnn.rpn_post_nms_top_n_test,
                 **hf_args,
             )
 

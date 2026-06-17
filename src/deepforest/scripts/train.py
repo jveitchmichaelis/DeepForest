@@ -144,7 +144,7 @@ def train(
     m.create_trainer(
         logger=loggers,
         callbacks=callbacks,
-        gradient_clip_val=0.5,
+        gradient_clip_val=config.gradient_clip_val,
         accelerator=config.accelerator,
         strategy=strategy,
     )

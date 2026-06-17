@@ -1,34 +1,58 @@
-# OAM-TCD (restor/tcd) dataset config for Mask R-CNN
+# OAM-TCD (restor/tcd) dataset config for Mask R-CNN.
+# Aligned with Restor-Foundation/tcd Detectron2 baseline:
+#   src/tcd_pipeline/config/model/detectron2/detectron_mask_rcnn.yaml
+#   IMS_PER_BATCH=8, MAX_ITER=100000, BASE_LR=0.001, FREEZE_AT=2,
+#   SCORE_THRESH_TEST=0.2, DETECTIONS_PER_IMAGE=512, AMP enabled,
+#   stepped LR @ iter 80000/90000 (gamma=0.1).
 
 defaults:
     - polygon
     - _self_
 
-batch_size: 16
+batch_size: 8
+workers: 8
+
+log_root: ./logs/maskrcnn
 
 label_dict:
     tree: 0
     canopy: 1
 num_classes: 2
 
+score_thresh: 0.2
+detections_per_img: 512
+
+maskrcnn:
+    trainable_backbone_layers: 3
+    rpn_pre_nms_top_n_test: 512
+    rpn_post_nms_top_n_test: 512
+
+gradient_clip_val: null
+precision: 16-mixed
+
 train:
     csv_file: data/tcd/train.json
     root_dir: data/tcd/train/images
-    lr: 0.002
+    preload_images: true
+    lr: 0.001
+    optimizer:
+        type: SGD
+        weight_decay: 0.0001
+        momentum: 0.9
     scheduler:
-        type: cosine
+        type: multistepLR
         params:
-            T_max: 10
-            eta_min: 0.00002
-    class_balanced_sampler: true
+            milestones: [80, 90]
+            gamma: 0.1
+    class_balanced_sampler: false
     class_balanced_loss: false
+    epochs: 100
     augmentations:
         - HorizontalFlip: {p: 0.5}
         - VerticalFlip: {p: 0.5}
-        - RandomResizedCrop: {size: [1024, 1024], scale: [0.7, 1.0], ratio: [1.0, 1.0], p: 1.0}
-        - RandomBrightnessContrast: {brightness: 0.2, contrast: 0.2, p: 0.5}
+        - RandomCrop: {size: [1024, 1024], p: 1.0}
 
 validation:
     csv_file: data/tcd/test.json
     root_dir: data/tcd/test/images
-
+    preload_images: true
