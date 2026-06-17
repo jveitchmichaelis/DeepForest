@@ -737,7 +737,10 @@ class PolygonDataset(TrainingDataset):
 
         image_tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float()
         boxes_tensor = torch.from_numpy(boxes).unsqueeze(0).float()
-        masks_tensor = torch.from_numpy(masks).unsqueeze(0).float()
+        # Keep masks as uint8 through the joint transform: a dense tile (500
+        # instances × 2048²) is 2 GB as uint8 vs 8 GB as float32, and the
+        # geometric transforms used here (flip/crop) preserve dtype.
+        masks_tensor = torch.from_numpy(masks).unsqueeze(0)
         augmented_image, augmented_boxes, augmented_masks = self.transform(
             image_tensor, boxes_tensor, masks_tensor
         )
