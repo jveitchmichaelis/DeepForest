@@ -33,7 +33,6 @@ precision: 16-mixed
 train:
     csv_file: data/tcd/train.json
     root_dir: data/tcd/train/images
-    preload_images: true
     lr: 0.001
     optimizer:
         type: SGD
@@ -55,4 +54,3 @@ train:
 validation:
     csv_file: data/tcd/test.json
     root_dir: data/tcd/test/images
-    preload_images: true
