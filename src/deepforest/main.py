@@ -409,16 +409,13 @@ class deepforest(pl.LightningModule):
                 f"Dataset from {csv_file} is empty. Check CSV for valid entries and columns."
             )
 
-        num_workers = self.config.workers
         data_loader = torch.utils.data.DataLoader(
             ds,
             batch_size=batch_size,
             shuffle=False if sampler is not None else shuffle,
             sampler=sampler,
             collate_fn=ds.collate_fn,
-            num_workers=num_workers,
-            pin_memory=num_workers > 0,
-            persistent_workers=num_workers > 0,
+            num_workers=self.config.workers,
         )
 
         return data_loader

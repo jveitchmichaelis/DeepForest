@@ -183,7 +183,7 @@ class Config:
     accelerator: str = "auto"
     batch_size: int = 1
     precision: str | None = None
-    matmul_precision: str = "highest"
+    matmul_precision: str = "high"
 
     architecture: str = "retinanet"
     num_classes: int | None = None
