@@ -1049,26 +1049,63 @@ class deepforest(pl.LightningModule):
 
         return results
 
+    def _build_param_groups(self, weight_decay: float):
+        """Split parameters so norm-layer affine params skip weight decay.
+
+        Matches Detectron2's ``WEIGHT_DECAY_NORM=0.0`` recipe: BatchNorm /
+        GroupNorm / LayerNorm scale and shift parameters are placed in a
+        zero-decay group; everything else (including biases, conv and
+        linear weights) uses the standard decay. Important for the v2
+        Mask R-CNN heads, which add BN to ``box_head`` and ``mask_head``.
+
+        Falls back to ``self.model.parameters()`` when no norm-layer
+        parameters are found, preserving current behaviour for
+        architectures without learnable BN/GN/LN.
+        """
+        norm_types = (
+            torch.nn.BatchNorm1d,
+            torch.nn.BatchNorm2d,
+            torch.nn.BatchNorm3d,
+            torch.nn.GroupNorm,
+            torch.nn.LayerNorm,
+        )
+        decay, no_decay = [], []
+        for module in self.model.modules():
+            for _name, p in module.named_parameters(recurse=False):
+                if not p.requires_grad:
+                    continue
+                if isinstance(module, norm_types):
+                    no_decay.append(p)
+                else:
+                    decay.append(p)
+        if not no_decay:
+            return self.model.parameters()
+        return [
+            {"params": decay, "weight_decay": weight_decay},
+            {"params": no_decay, "weight_decay": 0.0},
+        ]
+
     def configure_optimizers(self):
         opt_cfg = self.config.train.optimizer
         lr = self.config.train.lr
+        param_groups = self._build_param_groups(opt_cfg.weight_decay)
         if opt_cfg.type == "Adam":
             optimizer = optim.Adam(
-                self.model.parameters(),
+                param_groups,
                 lr=lr,
                 betas=tuple(opt_cfg.betas),
                 weight_decay=opt_cfg.weight_decay,
             )
         elif opt_cfg.type == "AdamW":
             optimizer = optim.AdamW(
-                self.model.parameters(),
+                param_groups,
                 lr=lr,
                 betas=tuple(opt_cfg.betas),
                 weight_decay=opt_cfg.weight_decay,
             )
         elif opt_cfg.type == "SGD":
             optimizer = optim.SGD(
-                self.model.parameters(),
+                param_groups,
                 lr=lr,
                 momentum=opt_cfg.momentum,
                 weight_decay=opt_cfg.weight_decay,

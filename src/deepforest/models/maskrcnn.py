@@ -15,6 +15,7 @@ from torchvision.models.detection import rpn as _rpn
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNN as _TorchvisionMaskRCNN
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
+from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 from deepforest.model import BaseModel
 
@@ -126,6 +127,23 @@ class _CheckpointedLayer(torch.nn.Module):
         # use_reentrant=False is required for inputs without requires_grad
         # (e.g. the first ResNet layer's input feature map under AMP).
         return checkpoint(self.layer, x, use_reentrant=False)
+
+
+class _NativeResolutionTransform(GeneralizedRCNNTransform):
+    """``GeneralizedRCNNTransform`` variant whose ``resize`` is a pass-through.
+
+    Training crops are produced at the augmentation-pipeline target size
+    (640×640 for OAM-TCD) and inference callers pass tiles at native
+    resolution. Torchvision's default ``min_size=800, max_size=1333``
+    would upscale 640 crops to 800 at training (wasted compute) and
+    downscale large patches at inference (destructive resolution loss).
+    Disabling resize matches Detectron2's ``MIN_SIZE_TEST=0`` and lets
+    the augmentation pipeline own all scale selection upstream. Normalize
+    and pad-to-size-divisible still run as usual.
+    """
+
+    def resize(self, image, target=None):
+        return image, target
 
 
 def _decode_panoptic_target(
@@ -275,6 +293,19 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
                 **kwargs,
             )
             self.load_state_dict(pretrained_state)
+
+        # Replace the GeneralizedRCNNTransform with a no-resize version so
+        # the model runs at the size produced by the dataset / caller. See
+        # ``_NativeResolutionTransform`` for rationale.
+        prev_transform = self.transform
+        self.transform = _NativeResolutionTransform(
+            min_size=prev_transform.min_size,
+            max_size=prev_transform.max_size,
+            image_mean=prev_transform.image_mean,
+            image_std=prev_transform.image_std,
+            size_divisible=prev_transform.size_divisible,
+            fixed_size=prev_transform.fixed_size,
+        )
 
         self.num_classes = num_classes
         self.label_dict = label_dict
@@ -481,6 +512,8 @@ class Model(BaseModel):
                 gradient_checkpointing=mrcnn.gradient_checkpointing,
                 inference_output=mrcnn.inference_output,
                 box_detections_per_img=self.config.detections_per_img,
+                rpn_pre_nms_top_n_train=mrcnn.rpn_pre_nms_top_n_train,
+                rpn_post_nms_top_n_train=mrcnn.rpn_post_nms_top_n_train,
                 rpn_pre_nms_top_n_test=mrcnn.rpn_pre_nms_top_n_test,
                 rpn_post_nms_top_n_test=mrcnn.rpn_post_nms_top_n_test,
             )
@@ -496,6 +529,8 @@ class Model(BaseModel):
                 gradient_checkpointing=mrcnn.gradient_checkpointing,
                 inference_output=mrcnn.inference_output,
                 box_detections_per_img=self.config.detections_per_img,
+                rpn_pre_nms_top_n_train=mrcnn.rpn_pre_nms_top_n_train,
+                rpn_post_nms_top_n_train=mrcnn.rpn_post_nms_top_n_train,
                 rpn_pre_nms_top_n_test=mrcnn.rpn_pre_nms_top_n_test,
                 rpn_post_nms_top_n_test=mrcnn.rpn_post_nms_top_n_test,
                 **hf_args,

@@ -20,10 +20,15 @@ label_dict:
 num_classes: 2
 
 score_thresh: 0.2
+# Paper: MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.5 (vs the polygon default 0.3).
+nms_thresh: 0.5
 detections_per_img: 512
 
 maskrcnn:
     trainable_backbone_layers: 3
+    # Paper RPN: POST_NMS_TOPK_TRAIN=1000 (torchvision default is 2000);
+    # PRE_NMS_TOPK_TRAIN=2000 matches the torchvision default.
+    rpn_post_nms_top_n_train: 1000
     rpn_pre_nms_top_n_test: 512
     rpn_post_nms_top_n_test: 512
     gradient_checkpointing: true
@@ -42,7 +47,8 @@ train:
     scheduler:
         type: multistepLR
         params:
-            milestones: [80, 90]
+            # Paper STEPS=[30k, 48k, 54k]/60k = 50%/80%/90% of training.
+            milestones: [50, 80, 90]
             gamma: 0.1
             # Detectron2 uses 1000-iter warmup at bs=8 (~1 epoch on OAM-TCD).
             warmup_epochs: 1

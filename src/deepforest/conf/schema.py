@@ -170,6 +170,11 @@ class MaskRCNNConfig:
     """
 
     trainable_backbone_layers: int | None = None
+    # Detectron2 uses pre_train=2000, post_train=1000; torchvision defaults
+    # to 2000 for both. Surface them so OAM-TCD can override post_train=1000
+    # to match the paper's ROI candidate distribution.
+    rpn_pre_nms_top_n_train: int = 2000
+    rpn_post_nms_top_n_train: int = 2000
     rpn_pre_nms_top_n_test: int = 1000
     rpn_post_nms_top_n_test: int = 1000
     gradient_checkpointing: bool = False
