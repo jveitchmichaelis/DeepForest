@@ -896,7 +896,7 @@ class deepforest(pl.LightningModule):
                 map_preds.append(
                     {
                         "masks": pred_masks.to(torch.bool),
-                        "scores": pred["scores"],
+                        "scores": pred["scores"].float(),
                         "labels": pred["labels"],
                     }
                 )
@@ -1110,9 +1110,40 @@ class deepforest(pl.LightningModule):
             )
 
         elif scheduler_type == "multistepLR":
-            scheduler = torch.optim.lr_scheduler.MultiStepLR(
-                optimizer, milestones=params.milestones, gamma=params.gamma
-            )
+            if params.warmup_epochs > 0:
+                # Step-level lambda so warmup ramps smoothly within the
+                # first ``warmup_epochs * steps_per_epoch`` iterations,
+                # matching Detectron2's iter-based ``WarmupMultiStepLR``.
+                # Milestones in the config remain epoch-indexed; we convert.
+                steps_per_epoch = max(
+                    1,
+                    self.trainer.estimated_stepping_batches
+                    // max(1, self.trainer.max_epochs),
+                )
+                warmup_iters = max(1, int(params.warmup_epochs) * steps_per_epoch)
+                step_milestones = [int(m) * steps_per_epoch for m in params.milestones]
+                start_factor = float(params.warmup_start_factor)
+                gamma = float(params.gamma)
+
+                def lr_lambda_warmup_multistep(step):
+                    if step < warmup_iters:
+                        return (
+                            start_factor
+                            + (1.0 - start_factor) * (step + 1) / warmup_iters
+                        )
+                    factor = 1.0
+                    for m in step_milestones:
+                        if step >= m:
+                            factor *= gamma
+                    return factor
+
+                scheduler = torch.optim.lr_scheduler.LambdaLR(
+                    optimizer, lr_lambda=lr_lambda_warmup_multistep
+                )
+            else:
+                scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                    optimizer, milestones=params.milestones, gamma=params.gamma
+                )
 
         elif scheduler_type == "exponentialLR":
             scheduler = torch.optim.lr_scheduler.ExponentialLR(
@@ -1139,11 +1170,21 @@ class deepforest(pl.LightningModule):
                 "exponentialLR, ReduceLROnPlateau."
             )
 
+        # Per-step interval for the warmup-prefixed multistep scheduler so
+        # the linear ramp is applied iteration-by-iteration rather than
+        # only at epoch boundaries.
+        step_level = scheduler_type == "multistepLR" and params.warmup_epochs > 0
+        lr_sched_cfg = (
+            {"scheduler": scheduler, "interval": "step", "frequency": 1}
+            if step_level
+            else scheduler
+        )
+
         # Monitor learning rate if val data is used
         if self.config.validation.csv_file is not None:
             return {
                 "optimizer": optimizer,
-                "lr_scheduler": scheduler,
+                "lr_scheduler": lr_sched_cfg,
                 "monitor": self.config.validation.lr_plateau_target,
             }
         else:

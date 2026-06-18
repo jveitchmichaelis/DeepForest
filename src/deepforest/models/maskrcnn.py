@@ -198,7 +198,24 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
                 if hasattr(body, name):
                     setattr(body, name, _CheckpointedLayer(getattr(body, name)))
 
+        # Detectron2-style init for the box predictor. Torchvision's
+        # ``FastRCNNPredictor`` falls back to ``nn.Linear``'s default
+        # Kaiming-uniform init (~30x larger std than Detectron2 uses for
+        # ``bbox_pred``); under SGD with momentum that destabilizes the
+        # box regression early in training and the val box_reg loss
+        # diverges. The mask predictor already uses Kaiming-normal
+        # ``fan_out`` in torchvision so it doesn't need adjustment.
+        self._init_box_predictor()
+
         self.update_config()
+
+    def _init_box_predictor(self) -> None:
+        """Re-init the box predictor with Detectron2's small-std recipe."""
+        box_predictor = self.roi_heads.box_predictor
+        torch.nn.init.normal_(box_predictor.cls_score.weight, std=0.01)
+        torch.nn.init.normal_(box_predictor.bbox_pred.weight, std=0.001)
+        torch.nn.init.constant_(box_predictor.cls_score.bias, 0)
+        torch.nn.init.constant_(box_predictor.bbox_pred.bias, 0)
 
     def apply_class_balanced_loss(self, annotations, label_dict: dict[str, int]) -> None:
         """Enable inverse-frequency classifier-CE weighting from train annotations.
@@ -256,6 +273,7 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
 
         in_features = self.roi_heads.box_predictor.cls_score.in_features
         self.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes + 1)
+        self._init_box_predictor()
 
         in_features_mask = self.roi_heads.mask_predictor.conv5_mask.in_channels
         hidden_layer = self.roi_heads.mask_predictor.conv5_mask.out_channels

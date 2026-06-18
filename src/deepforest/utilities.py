@@ -420,13 +420,14 @@ def format_boxes(prediction, scores=True):
         return None
 
     df = pd.DataFrame(
-        prediction["boxes"].cpu().detach().numpy(),
+        prediction["boxes"].float().cpu().detach().numpy(),
         columns=["xmin", "ymin", "xmax", "ymax"],
     )
     df["label"] = prediction["labels"].cpu().detach().numpy()
 
     if scores:
-        df["score"] = prediction["scores"].cpu().detach().numpy()
+        # Cast to fp32 — numpy has no bf16 dtype.
+        df["score"] = prediction["scores"].float().cpu().detach().numpy()
 
     df["geometry"] = df.apply(
         lambda x: shapely.geometry.box(x.xmin, x.ymin, x.xmax, x.ymax), axis=1
@@ -501,15 +502,16 @@ def format_polygons(prediction: dict, scores: bool = True) -> pd.DataFrame | Non
         if len(masks) == 0:
             return None
 
+        # Binarize on-device before going to numpy. Mask R-CNN under AMP
+        # returns bf16/fp16 logits; numpy has no bf16 dtype, so a direct
+        # ``.numpy()`` raises ``Got unsupported ScalarType BFloat16``.
+        if masks.is_floating_point():
+            masks = masks > 0.5
+
         masks = masks.cpu().detach().numpy()
         # Collapse the channel dimension of (N, 1, H, W) mask logits.
         if masks.ndim == 4:
             masks = masks[:, 0]
-
-        # Mask R-CNN emits soft masks in [0, 1]; binarize at 0.5. Target masks
-        # are already binary, so this is a no-op for them.
-        if np.issubdtype(masks.dtype, np.floating):
-            masks = masks > 0.5
 
         geometries = [mask_to_polygon(mask) for mask in masks]
 
@@ -517,7 +519,9 @@ def format_polygons(prediction: dict, scores: bool = True) -> pd.DataFrame | Non
     df["label"] = prediction["labels"].cpu().detach().numpy()
 
     if scores:
-        df["score"] = prediction["scores"].cpu().detach().numpy()
+        # Cast to fp32 — numpy has no bf16 dtype, and Lightning's
+        # ``16-mixed`` resolves to bf16 on CPU AMP.
+        df["score"] = prediction["scores"].float().cpu().detach().numpy()
 
     df["geometry"] = geometries
     return df

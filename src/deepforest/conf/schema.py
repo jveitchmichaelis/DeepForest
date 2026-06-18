@@ -34,6 +34,10 @@ class SchedulerParamsConfig:
     cooldown: int = 0
     min_lr: float = 0.0
     eps: float = 1e-8
+    # Linear LR warmup prefix for multistepLR. Detectron2 uses 1000 iters
+    # (~1 epoch at bs=8 on OAM-TCD). Set to 0 to disable.
+    warmup_epochs: int = 0
+    warmup_start_factor: float = 0.001
 
 
 @dataclass

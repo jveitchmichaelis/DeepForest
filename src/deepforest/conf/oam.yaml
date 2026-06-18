@@ -44,6 +44,9 @@ train:
         params:
             milestones: [80, 90]
             gamma: 0.1
+            # Detectron2 uses 1000-iter warmup at bs=8 (~1 epoch on OAM-TCD).
+            warmup_epochs: 1
+            warmup_start_factor: 0.001
     class_balanced_sampler: false
     class_balanced_loss: false
     epochs: 100
