@@ -876,6 +876,23 @@ class deepforest(pl.LightningModule):
                 if pred_masks.is_floating_point():
                     pred_masks = pred_masks > 0.5
 
+                # Targets from PolygonDataset are panoptic-encoded. Decode
+                # only the surviving instance IDs at validation tile size
+                # — bounded by ``detections_per_img`` so the (N, H, W)
+                # tensor is small enough for the mAP comparison.
+                if "panoptic_masks" in target:
+                    panoptic = target["panoptic_masks"]
+                    ids = target["unique_ids"]
+                    if ids.numel() == 0:
+                        H, W = panoptic.shape
+                        target_masks = torch.zeros(
+                            (0, H, W), dtype=torch.bool, device=panoptic.device
+                        )
+                    else:
+                        target_masks = panoptic.unsqueeze(0) == ids.view(-1, 1, 1)
+                else:
+                    target_masks = target["masks"].to(torch.bool)
+
                 map_preds.append(
                     {
                         "masks": pred_masks.to(torch.bool),
@@ -885,7 +902,7 @@ class deepforest(pl.LightningModule):
                 )
                 map_targets.append(
                     {
-                        "masks": target["masks"].to(torch.bool),
+                        "masks": target_masks,
                         "labels": target["labels"],
                     }
                 )

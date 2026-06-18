@@ -151,11 +151,25 @@ class MaskRCNNConfig:
     freezes the whole backbone, 5 trains all of it. ``=3`` is the
     closest analog to Detectron2's ``FREEZE_AT: 2`` used in the OAM-TCD
     paper (freezes stem + layer1).
+
+    ``gradient_checkpointing`` wraps the ResNet body's layer2-4 in
+    activation checkpointing — halves forward activation memory in
+    exchange for ~20-30% slower backward. Headroom for larger batches.
+
+    ``inference_output`` picks the eval-mode output format. ``dense``
+    preserves the torchvision default (per-instance ``(N, 1, H, W)``
+    masks) and is what the validation mAP metric expects. ``polygons``
+    vectorises masks immediately after the forward (via
+    ``cv2.findContours``) and drops the dense tensor — useful for
+    ``predict_image`` / ``predict_tile`` where the raw mask tensor
+    can dominate output memory.
     """
 
     trainable_backbone_layers: int | None = None
     rpn_pre_nms_top_n_test: int = 1000
     rpn_post_nms_top_n_test: int = 1000
+    gradient_checkpointing: bool = False
+    inference_output: str = "dense"  # one of: "dense", "polygons"
 
 
 @dataclass

@@ -26,6 +26,7 @@ maskrcnn:
     trainable_backbone_layers: 3
     rpn_pre_nms_top_n_test: 512
     rpn_post_nms_top_n_test: 512
+    gradient_checkpointing: true
 
 gradient_clip_val: null
 precision: 16-mixed

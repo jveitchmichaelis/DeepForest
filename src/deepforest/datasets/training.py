@@ -759,8 +759,9 @@ class PolygonDataset(TrainingDataset):
 
         # Decode the augmented panoptic into per-instance binary masks for
         # only the SURVIVING instances (those with at least one pixel inside
-        # the crop). This is where the (N, H, W) tensor finally materializes
-        # — at crop resolution and with the post-crop instance count.
+        # the crop). The (N, H, W) tensor materializes briefly here for
+        # filter_masks; it is dropped before the worker hands the target
+        # back through IPC (see end of method).
         # Cast to int32 for the decode arithmetic — torch's comparison ops
         # aren't implemented for uint16 on CPU. The cast is cheap at crop
         # resolution (~4 MB at 1024²).
@@ -780,29 +781,40 @@ class PolygonDataset(TrainingDataset):
             boxes = torch.zeros((0, 4), dtype=torch.float32)
             labels = torch.zeros(0, dtype=torch.int64)
 
-        boxes, labels, masks = self.filter_masks(
+        boxes, labels, masks, keep_idx = self.filter_masks(
             boxes,
             labels,
             masks,
             width=min(image_tensor.shape[3], image.shape[2]),
             height=min(image_tensor.shape[2], image.shape[1]),
+            return_keep_idx=True,
         )
+        unique_ids = unique_ids[keep_idx] if unique_ids.numel() else unique_ids
 
         # Edge case if all labels were augmented away, keep the image
         if len(boxes) == 0:
             boxes = torch.zeros((0, 4), dtype=torch.float32)
             labels = torch.zeros(0, dtype=torch.int64)
-            masks = torch.zeros((0, image.shape[1], image.shape[2]), dtype=torch.uint8)
+            unique_ids = torch.zeros(0, dtype=panoptic_hw.dtype)
+
+        # Drop the (N, H, W) tensor — it never crosses the IPC boundary.
+        # The model wrapper redecodes from panoptic_masks + unique_ids on
+        # device (see MaskRCNN.forward); validation mAP does the same in
+        # validation_step.
+        del masks
 
         targets = {
             "boxes": boxes,
             "labels": labels,
-            "masks": masks.to(torch.uint8),
+            "panoptic_masks": panoptic_hw,
+            "unique_ids": unique_ids,
         }
 
         return image, targets, self.image_names[idx]
 
-    def filter_masks(self, boxes, labels, masks, width, height, min_size=1) -> tuple:
+    def filter_masks(
+        self, boxes, labels, masks, width, height, min_size=1, return_keep_idx=False
+    ) -> tuple:
         """Clamp boxes to image bounds and filter boxes, labels and masks
         together by minimum box dimension.
 
@@ -813,11 +825,19 @@ class PolygonDataset(TrainingDataset):
             width (int): Image width in pixels.
             height (int): Image height in pixels.
             min_size (int): Minimum box width/height in pixels. Defaults to 1.
+            return_keep_idx (bool): If True, also return the long-tensor of
+                surviving indices into the original (N, ...) inputs. Needed by
+                ``PolygonDataset.__getitem__`` to filter the panoptic ID list
+                in lock-step with boxes/labels/masks.
 
         Returns:
-            tuple: (filtered_boxes, filtered_labels, filtered_masks)
+            tuple: (filtered_boxes, filtered_labels, filtered_masks) or
+                (filtered_boxes, filtered_labels, filtered_masks, keep_idx)
+                when ``return_keep_idx=True``.
         """
         if boxes.dim() != 2 or boxes.shape[0] == 0:
+            if return_keep_idx:
+                return boxes, labels, masks, torch.zeros(0, dtype=torch.long)
             return boxes, labels, masks
 
         boxes[:, 0] = torch.clamp(boxes[:, 0], min=0, max=width)
@@ -833,6 +853,9 @@ class PolygonDataset(TrainingDataset):
         if masks.dim() == 3:
             masks = masks[valid]
 
+        if return_keep_idx:
+            keep_idx = torch.nonzero(valid, as_tuple=False).squeeze(1)
+            return boxes[valid], labels[valid], masks, keep_idx
         return boxes[valid], labels[valid], masks
 
 

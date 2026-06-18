@@ -1,10 +1,14 @@
 import warnings
 from pathlib import Path
 
+import cv2
+import numpy as np
+import shapely.geometry
 import torch
 import torch.nn.functional as F
 import torchvision
 from huggingface_hub import PyTorchModelHubMixin
+from torch.utils.checkpoint import checkpoint
 from torchvision.models.detection import roi_heads as _rh
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNN as _TorchvisionMaskRCNN
@@ -55,6 +59,62 @@ def _weighted_fastrcnn_loss(class_logits, box_regression, labels, regression_tar
 _rh.fastrcnn_loss = _weighted_fastrcnn_loss
 
 
+class _CheckpointedLayer(torch.nn.Module):
+    """Wrap an nn.Module so its forward runs under activation checkpointing."""
+
+    def __init__(self, layer: torch.nn.Module):
+        super().__init__()
+        self.layer = layer
+
+    def forward(self, x):
+        # use_reentrant=False is required for inputs without requires_grad
+        # (e.g. the first ResNet layer's input feature map under AMP).
+        return checkpoint(self.layer, x, use_reentrant=False)
+
+
+def _decode_panoptic_target(
+    target: dict, dtype: torch.dtype = torch.uint8
+) -> torch.Tensor:
+    """Decode a panoptic-encoded target into per-instance binary masks.
+
+    Returns a ``(N, H, W)`` tensor on the same device as ``panoptic_masks``.
+    ``N`` is the number of surviving instance IDs in ``unique_ids``.
+    """
+    panoptic = target["panoptic_masks"]
+    ids = target["unique_ids"]
+    H, W = panoptic.shape
+    if ids.numel() == 0:
+        return torch.zeros((0, H, W), dtype=dtype, device=panoptic.device)
+    return (panoptic.unsqueeze(0) == ids.view(-1, 1, 1)).to(dtype)
+
+
+def _masks_to_polygons(masks: np.ndarray) -> list[shapely.geometry.Polygon]:
+    """Vectorise a stack of binary masks via the largest external contour.
+
+    Mirrors ``utilities.mask_to_polygon`` but operates on a stack; kept
+    in the model module so ``MaskRCNN.forward`` doesn't pull in a
+    cycle-prone import from ``utilities``.
+    """
+    polygons: list[shapely.geometry.Polygon] = []
+    for mask in masks:
+        contours, _ = cv2.findContours(
+            mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        if not contours:
+            polygons.append(shapely.geometry.Polygon())
+            continue
+        largest = max(contours, key=cv2.contourArea)
+        coords = largest.reshape(-1, 2)
+        if coords.shape[0] < 3:
+            polygons.append(shapely.geometry.Polygon())
+            continue
+        polygon = shapely.geometry.Polygon(coords)
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+        polygons.append(polygon)
+    return polygons
+
+
 def set_loss_class_weights(weights: list[float] | torch.Tensor | None) -> None:
     """Set the per-class weights used by Fast R-CNN's classification CE.
 
@@ -96,8 +156,14 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         score_thresh: float = 0.5,
         label_dict: dict = None,
         trainable_backbone_layers: int | None = None,
+        gradient_checkpointing: bool = False,
+        inference_output: str = "dense",
         **kwargs,
     ):
+        if inference_output not in ("dense", "polygons"):
+            raise ValueError(
+                f"inference_output must be 'dense' or 'polygons', got {inference_output!r}"
+            )
         backbone_kwargs = {"weights": backbone_weights}
         if trainable_backbone_layers is not None:
             backbone_kwargs["trainable_backbone_layers"] = trainable_backbone_layers
@@ -119,7 +185,18 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         self.nms_thresh = nms_thresh
         self.score_thresh = score_thresh
         self.trainable_backbone_layers = trainable_backbone_layers
+        self.gradient_checkpointing = gradient_checkpointing
+        self.inference_output = inference_output
         self.kwargs = kwargs
+
+        # Gradient checkpointing on the trainable ResNet stages. layer1 is
+        # frozen under trainable_backbone_layers=3 (the OAM-TCD setting),
+        # so it stores no activations and the wrapper buys nothing — skip.
+        if gradient_checkpointing:
+            body = self.backbone.body
+            for name in ("layer2", "layer3", "layer4"):
+                if hasattr(body, name):
+                    setattr(body, name, _CheckpointedLayer(getattr(body, name)))
 
         self.update_config()
 
@@ -194,15 +271,26 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
             "score_thresh": self.score_thresh,
             "label_dict": self.label_dict,
             "trainable_backbone_layers": self.trainable_backbone_layers,
+            "gradient_checkpointing": self.gradient_checkpointing,
+            "inference_output": self.inference_output,
             **self.kwargs,
         }
 
     def forward(self, images, targets=None):
-        """Shift labels between DeepForest (0-indexed) and torchvision
-        (background=0) conventions.
+        """Run the underlying torchvision Mask R-CNN, handling DeepForest's
+        zero-indexed label convention and (training-time) panoptic targets.
 
-        In training mode, target labels are shifted up by one. In eval
-        mode, predicted labels are shifted back down by one.
+        Targets coming from :class:`PolygonDataset` carry
+        ``panoptic_masks`` + ``unique_ids`` instead of dense
+        ``(N, H, W)`` masks. In training mode we decode them to dense
+        masks on-device just before the parent forward — the
+        ``(N, H, W)`` tensor never lives on CPU.
+
+        In eval mode and when ``inference_output == "polygons"``, the
+        dense mask logits returned by the model are vectorised via
+        ``cv2.findContours`` and replaced with a list of shapely
+        polygons. Saves the per-tile output payload in
+        ``predict_tile`` from ~GB to ~MB.
         """
         if self.training:
             if targets is None:
@@ -211,12 +299,26 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
             for target in targets:
                 shifted = dict(target)
                 shifted["labels"] = target["labels"] + 1
+                if "masks" not in shifted and "panoptic_masks" in shifted:
+                    shifted["masks"] = _decode_panoptic_target(shifted)
+                    shifted.pop("panoptic_masks", None)
+                    shifted.pop("unique_ids", None)
                 shifted_targets.append(shifted)
             return super().forward(images, shifted_targets)
 
         outputs = super().forward(images)
         for output in outputs:
             output["labels"] = output["labels"] - 1
+
+        if self.inference_output == "polygons":
+            for output in outputs:
+                dense = output.pop("masks", None)
+                if dense is None or dense.numel() == 0:
+                    output["polygons"] = []
+                    continue
+                binary = (dense.squeeze(1) > 0.5).cpu().numpy()
+                output["polygons"] = _masks_to_polygons(binary)
+
         return outputs
 
 
@@ -256,6 +358,8 @@ class Model(BaseModel):
                 score_thresh=self.config.score_thresh,
                 label_dict=label_dict,
                 trainable_backbone_layers=mrcnn.trainable_backbone_layers,
+                gradient_checkpointing=mrcnn.gradient_checkpointing,
+                inference_output=mrcnn.inference_output,
                 box_detections_per_img=self.config.detections_per_img,
                 rpn_pre_nms_top_n_test=mrcnn.rpn_pre_nms_top_n_test,
                 rpn_post_nms_top_n_test=mrcnn.rpn_post_nms_top_n_test,
@@ -269,6 +373,8 @@ class Model(BaseModel):
                 nms_thresh=self.config.nms_thresh,
                 score_thresh=self.config.score_thresh,
                 trainable_backbone_layers=mrcnn.trainable_backbone_layers,
+                gradient_checkpointing=mrcnn.gradient_checkpointing,
+                inference_output=mrcnn.inference_output,
                 box_detections_per_img=self.config.detections_per_img,
                 rpn_pre_nms_top_n_test=mrcnn.rpn_pre_nms_top_n_test,
                 rpn_post_nms_top_n_test=mrcnn.rpn_post_nms_top_n_test,
@@ -286,5 +392,8 @@ class Model(BaseModel):
         predictions = test_model(x)
         assert len(predictions) == 2
 
+        instance_key = (
+            "polygons" if test_model.inference_output == "polygons" else "masks"
+        )
         model_keys = sorted(predictions[1].keys())
-        assert model_keys == ["boxes", "labels", "masks", "scores"]
+        assert model_keys == sorted(["boxes", "labels", instance_key, "scores"])

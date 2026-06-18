@@ -111,15 +111,14 @@ class PredictionDataset(Dataset):
     def determine_geometry_type(self, batched_result):
         """Determine the geometry type of the batched result."""
         # Assumes that all geometries are the same in a batch. Polygon model
-        # results contain both "masks" and "boxes"; masks take precedence.
-        if "masks" in batched_result.keys():
+        # results contain "masks" (dense mode) or "polygons" (vectorised
+        # mode); both take precedence over "boxes".
+        if "masks" in batched_result.keys() or "polygons" in batched_result.keys():
             geom_type = "polygon"
         elif "boxes" in batched_result.keys():
             geom_type = "box"
         elif "points" in batched_result.keys():
             geom_type = "point"
-        elif "polygons" in batched_result.keys():
-            geom_type = "polygon"
         else:
             raise ValueError(
                 f"Unknown geometry type, prediction keys are {batched_result.keys()}"

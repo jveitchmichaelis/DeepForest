@@ -357,7 +357,15 @@ def determine_geometry_type(df):
     elif isinstance(df, dict):
         # Mask R-CNN predictions contain both "masks" and "boxes"; the masks
         # take precedence and mark the result as a polygon (instance mask).
-        if "masks" in df.keys():
+        # When ``inference_output == "polygons"``, the model wrapper has
+        # already vectorised the masks and the dict carries ``polygons``.
+        # Training/validation targets from PolygonDataset carry the
+        # panoptic-encoded representation instead.
+        if (
+            "masks" in df.keys()
+            or "polygons" in df.keys()
+            or "panoptic_masks" in df.keys()
+        ):
             geometry_type = "polygon"
         elif "boxes" in df.keys():
             geometry_type = "box"
@@ -473,21 +481,37 @@ def format_polygons(prediction: dict, scores: bool = True) -> pd.DataFrame | Non
         DataFrame with ``label``, optional ``score``, and ``geometry``
         columns, or ``None`` when there are no instances.
     """
-    masks = prediction["masks"]
-    if len(masks) == 0:
-        return None
+    # When the model wrapper has already vectorised masks (Mask R-CNN
+    # ``inference_output == "polygons"``), use the polygons directly.
+    if "polygons" in prediction:
+        geometries = list(prediction["polygons"])
+        if len(geometries) == 0:
+            return None
+    elif "panoptic_masks" in prediction:
+        # Targets from PolygonDataset are panoptic-encoded. Decode the
+        # surviving instance IDs and rasterise each one's contour. The
+        # (N, H, W) tensor only ever materializes one instance at a time.
+        panoptic = prediction["panoptic_masks"].cpu().detach().numpy()
+        ids = prediction["unique_ids"].cpu().detach().numpy()
+        if ids.size == 0:
+            return None
+        geometries = [mask_to_polygon((panoptic == i).astype(np.uint8)) for i in ids]
+    else:
+        masks = prediction["masks"]
+        if len(masks) == 0:
+            return None
 
-    masks = masks.cpu().detach().numpy()
-    # Collapse the channel dimension of (N, 1, H, W) mask logits.
-    if masks.ndim == 4:
-        masks = masks[:, 0]
+        masks = masks.cpu().detach().numpy()
+        # Collapse the channel dimension of (N, 1, H, W) mask logits.
+        if masks.ndim == 4:
+            masks = masks[:, 0]
 
-    # Mask R-CNN emits soft masks in [0, 1]; binarize at 0.5. Target masks
-    # are already binary, so this is a no-op for them.
-    if np.issubdtype(masks.dtype, np.floating):
-        masks = masks > 0.5
+        # Mask R-CNN emits soft masks in [0, 1]; binarize at 0.5. Target masks
+        # are already binary, so this is a no-op for them.
+        if np.issubdtype(masks.dtype, np.floating):
+            masks = masks > 0.5
 
-    geometries = [mask_to_polygon(mask) for mask in masks]
+        geometries = [mask_to_polygon(mask) for mask in masks]
 
     df = pd.DataFrame()
     df["label"] = prediction["labels"].cpu().detach().numpy()
@@ -594,7 +618,9 @@ def read_coco(json_file):
                 continue
 
             merged_poly = (
-                poly_list[0] if len(poly_list) == 1 else shapely.ops.unary_union(poly_list)
+                poly_list[0]
+                if len(poly_list) == 1
+                else shapely.ops.unary_union(poly_list)
             )
 
         if merged_poly.is_empty:
