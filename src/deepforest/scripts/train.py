@@ -10,7 +10,7 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import DeviceStatsMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
 
-from deepforest.callbacks import ImagesCallback
+from deepforest.callbacks import ImagesCallback, MemoryMonitorCallback
 from deepforest.main import deepforest
 
 
@@ -126,6 +126,8 @@ def train(
             select_random=True,
         )
     )
+
+    callbacks.append(MemoryMonitorCallback())
 
     # Setup checkpoint to store in log directory
     if checkpoint:

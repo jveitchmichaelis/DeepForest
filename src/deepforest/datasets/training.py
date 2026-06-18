@@ -653,26 +653,29 @@ class PolygonDataset(TrainingDataset):
             A ``(height, width)`` uint8 array with the polygon interior set.
         """
         mask = np.zeros((height, width), dtype=np.uint8)
+        self._fill_mask(mask, geom, value=1)
+        return mask
 
+    @staticmethod
+    def _fill_mask(out: np.ndarray, geom, value: int = 1) -> None:
+        """Rasterize ``geom`` into ``out`` in place (no allocation)."""
         if isinstance(geom, str):
             geom = shapely.wkt.loads(geom)
 
         if geom.geom_type == "Polygon":
             coords = np.array(geom.exterior.coords, dtype=np.int32)
-            cv2.fillPoly(mask, [coords], color=1)
+            cv2.fillPoly(out, [coords], color=value)
         elif geom.geom_type == "MultiPolygon":
             for poly in geom.geoms:
                 if not poly.is_empty:
                     coords = np.array(poly.exterior.coords, dtype=np.int32)
-                    cv2.fillPoly(mask, [coords], color=1)
+                    cv2.fillPoly(out, [coords], color=value)
         elif geom.geom_type == "GeometryCollection":
             # unary_union of touching polygons can produce a GeometryCollection
             for sub in geom.geoms:
                 if sub.geom_type == "Polygon" and not sub.is_empty:
                     coords = np.array(sub.exterior.coords, dtype=np.int32)
-                    cv2.fillPoly(mask, [coords], color=1)
-
-        return mask
+                    cv2.fillPoly(out, [coords], color=value)
 
     def annotations_for_path(self, image_path, return_tensor=False) -> dict:
         """Construct target dictionary for a given image path.
@@ -728,27 +731,54 @@ class PolygonDataset(TrainingDataset):
             labels = np.zeros(0, dtype=np.int64)
             geometries = []
 
-        if len(geometries) > 0:
-            masks = np.stack(
-                [self.generate_mask(geom, width, height) for geom in geometries]
-            ).astype(np.uint8)
-        else:
-            masks = np.zeros((0, height, width), dtype=np.uint8)
+        # Encode all instance masks into a single (H, W) uint16 panoptic map:
+        # pixel value = instance_id (1-indexed; 0 = background). On a dense
+        # 500-tree 2048² tile this is ~8 MB instead of ~2 GB as a stacked
+        # (N, H, W) uint8 tensor. Drawing order is annotation order, so later
+        # polygons win contested pixels on overlap.
+        n_geoms = len(geometries)
+        if n_geoms > 65535:
+            raise ValueError(
+                f"PolygonDataset: panoptic encoding supports up to 65535 "
+                f"instances per tile, got {n_geoms}"
+            )
+        panoptic = np.zeros((height, width), dtype=np.uint16)
+        for i, geom in enumerate(geometries):
+            self._fill_mask(panoptic, geom, value=i + 1)
 
         image_tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float()
         boxes_tensor = torch.from_numpy(boxes).unsqueeze(0).float()
-        # Keep masks as uint8 through the joint transform: a dense tile (500
-        # instances × 2048²) is 2 GB as uint8 vs 8 GB as float32, and the
-        # geometric transforms used here (flip/crop) preserve dtype.
-        masks_tensor = torch.from_numpy(masks).unsqueeze(0)
-        augmented_image, augmented_boxes, augmented_masks = self.transform(
-            image_tensor, boxes_tensor, masks_tensor
+        panoptic_tensor = torch.from_numpy(panoptic).unsqueeze(0).unsqueeze(0)
+        augmented_image, augmented_boxes, augmented_panoptic = self.transform(
+            image_tensor, boxes_tensor, panoptic_tensor
         )
 
         image = augmented_image.squeeze(0)
         boxes = augmented_boxes.squeeze(0)
-        masks = augmented_masks.squeeze(0)
-        labels = torch.from_numpy(labels.astype(np.int64))
+        labels_tensor = torch.from_numpy(labels.astype(np.int64))
+
+        # Decode the augmented panoptic into per-instance binary masks for
+        # only the SURVIVING instances (those with at least one pixel inside
+        # the crop). This is where the (N, H, W) tensor finally materializes
+        # — at crop resolution and with the post-crop instance count.
+        # Cast to int32 for the decode arithmetic — torch's comparison ops
+        # aren't implemented for uint16 on CPU. The cast is cheap at crop
+        # resolution (~4 MB at 1024²).
+        panoptic_hw = augmented_panoptic.squeeze(0).squeeze(0).to(torch.int32)
+        unique_ids = torch.unique(panoptic_hw)
+        unique_ids = unique_ids[unique_ids > 0]
+        if len(unique_ids) > 0:
+            surviving = unique_ids.long() - 1
+            masks = (panoptic_hw.unsqueeze(0) == unique_ids.view(-1, 1, 1)).to(
+                torch.uint8
+            )
+            boxes = boxes[surviving]
+            labels = labels_tensor[surviving]
+        else:
+            H, W = panoptic_hw.shape
+            masks = torch.zeros((0, H, W), dtype=torch.uint8)
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros(0, dtype=torch.int64)
 
         boxes, labels, masks = self.filter_masks(
             boxes,

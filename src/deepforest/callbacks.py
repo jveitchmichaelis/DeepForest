@@ -12,6 +12,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import psutil
 import shapely.geometry
 import supervision as sv
 import torch
@@ -50,7 +51,7 @@ def _df_to_comet_annotations(
 
         entry: dict = {"label": label}
         if hasattr(row, "score") and row.score is not None and not pd.isna(row.score):
-            entry["score"] = float(row.score) * 100.0
+            entry["score"] = round(float(row.score), 2)
 
         if isinstance(geom, shapely.geometry.Point):
             # Render points as a small fixed-size marker box.
@@ -85,6 +86,74 @@ def _df_to_comet_annotations(
         return None
 
     return {"name": layer_name, "data": items}
+
+
+class MemoryMonitorCallback(Callback):
+    """Log per-batch process and CUDA memory to all attached loggers.
+
+    Emits four scalars (in GB) at every ``every_n_batches`` train and
+    validation batch:
+
+    - ``mem/{phase}_main_gb``: main process RSS
+    - ``mem/{phase}_workers_gb``: summed RSS of all child processes (the
+      DataLoader workers)
+    - ``mem/{phase}_cuda_alloc_gb``: ``torch.cuda.memory_allocated()``
+    - ``mem/{phase}_cuda_peak_gb``: ``torch.cuda.max_memory_allocated()``
+      since the previous emit (peak is reset after logging)
+
+    Used to localize OOMs: a growing ``workers_gb`` indicates dataset /
+    augmentation memory blow-up; a growing ``main_gb`` points at metric
+    accumulation or logger buffering; a CUDA peak that climbs each
+    epoch suggests allocator fragmentation.
+    """
+
+    def __init__(self, every_n_batches: int = 10):
+        super().__init__()
+        self.every_n_batches = every_n_batches
+        self._process: psutil.Process | None = None
+
+    def _proc(self) -> psutil.Process:
+        if self._process is None:
+            self._process = psutil.Process()
+        return self._process
+
+    def _emit(self, trainer, phase: str) -> None:
+        if not trainer.loggers:
+            return
+        try:
+            p = self._proc()
+            main_gb = p.memory_info().rss / 1e9
+            children_gb = (
+                sum(c.memory_info().rss for c in p.children(recursive=True)) / 1e9
+            )
+        except psutil.Error:
+            return
+
+        metrics = {
+            f"mem/{phase}_main_gb": main_gb,
+            f"mem/{phase}_workers_gb": children_gb,
+        }
+        if torch.cuda.is_available():
+            metrics[f"mem/{phase}_cuda_alloc_gb"] = (
+                torch.cuda.memory_allocated() / 1e9
+            )
+            metrics[f"mem/{phase}_cuda_peak_gb"] = (
+                torch.cuda.max_memory_allocated() / 1e9
+            )
+            torch.cuda.reset_peak_memory_stats()
+
+        for logger in trainer.loggers:
+            logger.log_metrics(metrics, step=trainer.global_step)
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if batch_idx % self.every_n_batches == 0:
+            self._emit(trainer, "train")
+
+    def on_validation_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+    ):
+        if batch_idx % self.every_n_batches == 0:
+            self._emit(trainer, "val")
 
 
 class ImagesCallback(Callback):
