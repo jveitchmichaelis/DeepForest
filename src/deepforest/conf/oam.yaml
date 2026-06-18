@@ -34,7 +34,7 @@ precision: 16-mixed
 train:
     csv_file: data/tcd/train.json
     root_dir: data/tcd/train/images
-    lr: 0.001
+    lr: 0.005   # paper BASE_LR
     optimizer:
         type: SGD
         weight_decay: 0.0001
@@ -51,9 +51,17 @@ train:
     class_balanced_loss: false
     epochs: 100
     augmentations:
+        # Multi-scale-equivalent crop: matches paper's MIN_SIZE_TRAIN[640..800]
+        # downsample range (~2.56-3.2 native px per output px on the 2048
+        # source tile) using a continuous scale rather than the paper's
+        # discrete choice. Fixed 640×640 output for FPN consistency.
         - HorizontalFlip: {p: 0.5}
         - VerticalFlip: {p: 0.5}
-        - RandomCrop: {size: [1024, 1024], p: 1.0}
+        - RandomResizedCrop:
+            size: [640, 640]
+            scale: [0.64, 1.0]
+            ratio: [1.0, 1.0]
+            p: 1.0
 
 validation:
     csv_file: data/tcd/test.json

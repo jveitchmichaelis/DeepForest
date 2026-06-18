@@ -8,8 +8,10 @@ import torch
 import torch.nn.functional as F
 import torchvision
 from huggingface_hub import PyTorchModelHubMixin
+from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 from torchvision.models.detection import roi_heads as _rh
+from torchvision.models.detection import rpn as _rpn
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNN as _TorchvisionMaskRCNN
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
@@ -20,24 +22,37 @@ from deepforest.model import BaseModel
 # set_loss_class_weights(); when None, the original torchvision loss runs.
 _CLASS_WEIGHTS: torch.Tensor | None = None
 _ORIG_FASTRCNN_LOSS = _rh.fastrcnn_loss
+_ORIG_RPN_COMPUTE_LOSS = _rpn.RegionProposalNetwork.compute_loss
+
+# Detectron2 uses pure L1 (beta=0) for both the RPN and the second-stage
+# box regression. Torchvision hardcodes ``beta=1/9`` in two places. With
+# small-std init, the predictor starts in the smooth-L1 quadratic region
+# where the gradient is ``9x`` for ``|x| < 1/9`` — stronger than pure
+# L1's constant ±1 cap, which can drive box-reg divergence under SGD.
+# Matches ``MODEL.ROI_BOX_HEAD.SMOOTH_L1_BETA = 0.0`` and
+# ``MODEL.RPN.SMOOTH_L1_BETA = 0.0`` in the Restor-Foundation/tcd config.
+_SMOOTH_L1_BETA: float = 0.0
 
 
 def _weighted_fastrcnn_loss(class_logits, box_regression, labels, regression_targets):
-    """Monkey-patched replacement for torchvision.models.detection.roi_heads.fastrcnn_loss.
+    """Monkey-patched replacement for ``roi_heads.fastrcnn_loss``.
 
-    Identical to the original except the classification CE is weighted by
-    ``_CLASS_WEIGHTS`` when set. The box regression loss is untouched.
+    Two changes vs. the upstream version:
+
+    1. When ``_CLASS_WEIGHTS`` is set, the classification cross-entropy
+       is weighted (used by ``apply_class_balanced_loss``).
+    2. The smooth-L1 box-regression beta is taken from
+       ``_SMOOTH_L1_BETA`` rather than hardcoded ``1/9``, so it can be
+       set to ``0`` (pure L1) to match Detectron2's default.
     """
-    if _CLASS_WEIGHTS is None:
-        return _ORIG_FASTRCNN_LOSS(
-            class_logits, box_regression, labels, regression_targets
-        )
-
     labels_cat = torch.cat(labels, dim=0)
     regression_targets_cat = torch.cat(regression_targets, dim=0)
 
-    weights = _CLASS_WEIGHTS.to(class_logits.device, dtype=class_logits.dtype)
-    classification_loss = F.cross_entropy(class_logits, labels_cat, weight=weights)
+    if _CLASS_WEIGHTS is None:
+        classification_loss = F.cross_entropy(class_logits, labels_cat)
+    else:
+        weights = _CLASS_WEIGHTS.to(class_logits.device, dtype=class_logits.dtype)
+        classification_loss = F.cross_entropy(class_logits, labels_cat, weight=weights)
 
     sampled_pos_inds_subset = torch.where(labels_cat > 0)[0]
     labels_pos = labels_cat[sampled_pos_inds_subset]
@@ -47,7 +62,7 @@ def _weighted_fastrcnn_loss(class_logits, box_regression, labels, regression_tar
         F.smooth_l1_loss(
             box_regression_r[sampled_pos_inds_subset, labels_pos],
             regression_targets_cat[sampled_pos_inds_subset],
-            beta=1 / 9,
+            beta=_SMOOTH_L1_BETA,
             reduction="sum",
         )
         / labels_cat.numel()
@@ -56,7 +71,48 @@ def _weighted_fastrcnn_loss(class_logits, box_regression, labels, regression_tar
     return classification_loss, box_loss
 
 
+def _rpn_compute_loss(
+    self,
+    objectness: Tensor,
+    pred_bbox_deltas: Tensor,
+    labels: list[Tensor],
+    regression_targets: list[Tensor],
+) -> tuple[Tensor, Tensor]:
+    """Monkey-patched replacement for ``RegionProposalNetwork.compute_loss``.
+
+    Identical to the upstream method except the smooth-L1 ``beta`` is
+    taken from the module-level ``_SMOOTH_L1_BETA`` so we can match
+    Detectron2's pure-L1 RPN box regression.
+    """
+    sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
+    sampled_pos_inds = torch.where(torch.cat(sampled_pos_inds, dim=0))[0]
+    sampled_neg_inds = torch.where(torch.cat(sampled_neg_inds, dim=0))[0]
+    sampled_inds = torch.cat([sampled_pos_inds, sampled_neg_inds], dim=0)
+
+    objectness = objectness.flatten()
+
+    labels_cat = torch.cat(labels, dim=0)
+    regression_targets_cat = torch.cat(regression_targets, dim=0)
+
+    box_loss = (
+        F.smooth_l1_loss(
+            pred_bbox_deltas[sampled_pos_inds],
+            regression_targets_cat[sampled_pos_inds],
+            beta=_SMOOTH_L1_BETA,
+            reduction="sum",
+        )
+        / sampled_inds.numel()
+    )
+
+    objectness_loss = F.binary_cross_entropy_with_logits(
+        objectness[sampled_inds], labels_cat[sampled_inds]
+    )
+
+    return objectness_loss, box_loss
+
+
 _rh.fastrcnn_loss = _weighted_fastrcnn_loss
+_rpn.RegionProposalNetwork.compute_loss = _rpn_compute_loss
 
 
 class _CheckpointedLayer(torch.nn.Module):
@@ -164,21 +220,61 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
             raise ValueError(
                 f"inference_output must be 'dense' or 'polygons', got {inference_output!r}"
             )
-        backbone_kwargs = {"weights": backbone_weights}
+        factory_kwargs = {"weights": backbone_weights}
         if trainable_backbone_layers is not None:
-            backbone_kwargs["trainable_backbone_layers"] = trainable_backbone_layers
-        backbone = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(
-            **backbone_kwargs
-        ).backbone
-
-        # torchvision reserves class 0 for background, so add one class.
-        super().__init__(
-            backbone=backbone,
-            num_classes=num_classes + 1,
-            box_nms_thresh=nms_thresh,
-            box_score_thresh=score_thresh,
-            **kwargs,
+            factory_kwargs["trainable_backbone_layers"] = trainable_backbone_layers
+        # Build the full torchvision Mask R-CNN. When ``backbone_weights``
+        # is set (e.g. ``"COCO_V1"``) this gives us COCO-pretrained
+        # weights for backbone + FPN + RPN + box_head + mask_head +
+        # predictors. We use the factory's backbone module directly and
+        # copy the rest of the weights via ``load_state_dict`` after
+        # ``super().__init__`` builds our architectural shell.
+        pretrained_full = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(
+            **factory_kwargs
         )
+
+        # Reuse the v2 factory's RPN / box / mask head modules so the
+        # internal architecture matches the pretrained state_dict shape
+        # (``maskrcnn_resnet50_fpn_v2`` differs from base ``MaskRCNN``
+        # defaults — RPNHead has ``conv_depth=2``, ``FastRCNNConvFCHead``
+        # replaces ``TwoMLPHead``, and ``MaskRCNNHeads`` uses BN).
+        v2_head_kwargs = {
+            "rpn_anchor_generator": pretrained_full.rpn.anchor_generator,
+            "rpn_head": pretrained_full.rpn.head,
+            "box_head": pretrained_full.roi_heads.box_head,
+            "mask_head": pretrained_full.roi_heads.mask_head,
+        }
+
+        if backbone_weights is None:
+            # Cold start — no COCO weights to preserve.
+            super().__init__(
+                backbone=pretrained_full.backbone,
+                num_classes=num_classes + 1,
+                box_nms_thresh=nms_thresh,
+                box_score_thresh=score_thresh,
+                **v2_head_kwargs,
+                **kwargs,
+            )
+        else:
+            # Build with the pretrained model's num_classes so state_dict
+            # loads cleanly, then re-shape final predictor layers for our
+            # num_classes via ``_adjust_classes``. This preserves the
+            # COCO-pretrained RPN, box_head, mask_head, and the
+            # *non-final-layer* predictor weights — only the last cls /
+            # bbox / mask channels are re-init'd.
+            pretrained_state = pretrained_full.state_dict()
+            coco_num_classes_ext = (
+                pretrained_full.roi_heads.box_predictor.cls_score.out_features
+            )
+            super().__init__(
+                backbone=pretrained_full.backbone,
+                num_classes=coco_num_classes_ext,
+                box_nms_thresh=nms_thresh,
+                box_score_thresh=score_thresh,
+                **v2_head_kwargs,
+                **kwargs,
+            )
+            self.load_state_dict(pretrained_state)
 
         self.num_classes = num_classes
         self.label_dict = label_dict
@@ -205,7 +301,13 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         # box regression early in training and the val box_reg loss
         # diverges. The mask predictor already uses Kaiming-normal
         # ``fan_out`` in torchvision so it doesn't need adjustment.
-        self._init_box_predictor()
+        #
+        # When we loaded COCO weights, ``_adjust_classes`` will re-init
+        # the predictor for our ``num_classes`` and call this internally.
+        if backbone_weights is None:
+            self._init_box_predictor()
+        else:
+            self._adjust_classes(num_classes)
 
         self.update_config()
 
