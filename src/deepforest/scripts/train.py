@@ -14,7 +14,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
 
-from deepforest.callbacks import ImagesCallback, MemoryMonitorCallback
+from deepforest.callbacks import ImagesCallback
 from deepforest.main import deepforest
 
 
@@ -130,8 +130,6 @@ def train(
             select_random=True,
         )
     )
-
-    callbacks.append(MemoryMonitorCallback())
 
     # Force tqdm-based progress bar
     callbacks.append(TQDMProgressBar(refresh_rate=50))

@@ -96,13 +96,21 @@ class deepforest(pl.LightningModule):
         if not self.config.validation.csv_file and self.existing_val_dataloader is None:
             return
 
+        # Configs may allow more detections per image than the COCO scorer
+        # default cap of 100. The third threshold drives the AP/AR@max-dets
+        # numbers we actually care about; the lower two are kept so we still
+        # report standard ``AR@1`` and ``AR@10``.
+        max_dets = [1, 10, max(100, self.config.detections_per_img)]
+
         # Box Metrics
         if self.model.task == "box":
             self.iou_metric = IntersectionOverUnion(
                 class_metrics=True, iou_threshold=self.config.validation.iou_threshold
             )
 
-            self.mAP_metric = MeanAveragePrecision(backend="faster_coco_eval")
+            self.mAP_metric = MeanAveragePrecision(
+                backend="faster_coco_eval", max_detection_thresholds=max_dets
+            )
 
             self.precision_recall_metric = RecallPrecision(
                 iou_threshold=self.config.validation.iou_threshold,
@@ -121,7 +129,9 @@ class deepforest(pl.LightningModule):
         # Instance segmentation metrics
         elif self.model.task == "polygon":
             self.mAP_metric = MeanAveragePrecision(
-                iou_type="segm", backend="faster_coco_eval"
+                iou_type="segm",
+                backend="faster_coco_eval",
+                max_detection_thresholds=max_dets,
             )
             self.precision_recall_metric = RecallPrecision(
                 iou_threshold=self.config.validation.iou_threshold,
@@ -268,6 +278,7 @@ class deepforest(pl.LightningModule):
             "callbacks": callbacks,
             "limit_val_batches": limit_val_batches,
             "num_sanity_val_steps": num_sanity_val_steps,
+            "check_val_every_n_epoch": self.config.validation.val_accuracy_interval,
             "default_root_dir": self.config.log_root,
         }
         if self.config.precision is not None:
@@ -925,9 +936,7 @@ class deepforest(pl.LightningModule):
         self.print(f"[epoch {self.current_epoch}] train start")
 
     def on_train_epoch_end(self):
-        elapsed = time.monotonic() - getattr(
-            self, "_train_epoch_start", time.monotonic()
-        )
+        elapsed = time.monotonic() - getattr(self, "_train_epoch_start", time.monotonic())
         self.print(f"[epoch {self.current_epoch}] train end ({elapsed:.1f}s)")
 
     def on_validation_epoch_start(self):
@@ -982,9 +991,7 @@ class deepforest(pl.LightningModule):
         if self.trainer.sanity_checking:  # optional skip
             return
 
-        elapsed = time.monotonic() - getattr(
-            self, "_val_epoch_start", time.monotonic()
-        )
+        elapsed = time.monotonic() - getattr(self, "_val_epoch_start", time.monotonic())
         self.print(f"[epoch {self.current_epoch}] validation end ({elapsed:.1f}s)")
 
         # Log epoch metrics

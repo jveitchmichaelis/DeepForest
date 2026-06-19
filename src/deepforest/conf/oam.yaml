@@ -72,3 +72,9 @@ train:
 validation:
     csv_file: data/tcd/test.json
     root_dir: data/tcd/test/images
+    # Val step + segm mAP cost a lot for this model; run every 5 epochs.
+    # Also gates ``check_val_every_n_epoch`` in the trainer.
+    val_accuracy_interval: 5
+    # Reduce val time dunring training. 
+    augmentations:
+        - Resize: {max_size: 1024}

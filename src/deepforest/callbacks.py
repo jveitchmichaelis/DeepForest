@@ -91,20 +91,24 @@ def _df_to_comet_annotations(
 class MemoryMonitorCallback(Callback):
     """Log per-batch process and CUDA memory to all attached loggers.
 
-    Emits four scalars (in GB) at every ``every_n_batches`` train and
-    validation batch:
+    Emits in GB at every ``every_n_batches`` train and validation batch:
 
     - ``mem/{phase}_main_gb``: main process RSS
     - ``mem/{phase}_workers_gb``: summed RSS of all child processes (the
       DataLoader workers)
-    - ``mem/{phase}_cuda_alloc_gb``: ``torch.cuda.memory_allocated()``
+    - ``mem/{phase}_cuda_alloc_gb``: ``torch.cuda.memory_allocated()`` —
+      bytes currently held by live tensors
     - ``mem/{phase}_cuda_peak_gb``: ``torch.cuda.max_memory_allocated()``
       since the previous emit (peak is reset after logging)
+    - ``mem/{phase}_cuda_reserved_gb``: ``torch.cuda.memory_reserved()`` —
+      bytes currently held by PyTorch's caching allocator (matches
+      ``nvidia-smi`` and is what an OOM is actually competing against)
+    - ``mem/{phase}_cuda_peak_reserved_gb``: peak reserved since last reset
 
     Used to localize OOMs: a growing ``workers_gb`` indicates dataset /
     augmentation memory blow-up; a growing ``main_gb`` points at metric
-    accumulation or logger buffering; a CUDA peak that climbs each
-    epoch suggests allocator fragmentation.
+    accumulation or logger buffering; a ``cuda_peak_reserved`` that climbs
+    each epoch suggests allocator fragmentation.
     """
 
     def __init__(self, every_n_batches: int = 10):
@@ -134,11 +138,11 @@ class MemoryMonitorCallback(Callback):
             f"mem/{phase}_workers_gb": children_gb,
         }
         if torch.cuda.is_available():
-            metrics[f"mem/{phase}_cuda_alloc_gb"] = (
-                torch.cuda.memory_allocated() / 1e9
-            )
-            metrics[f"mem/{phase}_cuda_peak_gb"] = (
-                torch.cuda.max_memory_allocated() / 1e9
+            metrics[f"mem/{phase}_cuda_alloc_gb"] = torch.cuda.memory_allocated() / 1e9
+            metrics[f"mem/{phase}_cuda_peak_gb"] = torch.cuda.max_memory_allocated() / 1e9
+            metrics[f"mem/{phase}_cuda_reserved_gb"] = torch.cuda.memory_reserved() / 1e9
+            metrics[f"mem/{phase}_cuda_peak_reserved_gb"] = (
+                torch.cuda.max_memory_reserved() / 1e9
             )
             torch.cuda.reset_peak_memory_stats()
 
