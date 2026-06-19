@@ -315,11 +315,49 @@ class ImagesCallback(Callback):
         for image_name in selected_images:
             pred_df = df[df.image_path == image_name]
 
-            targets = utilities.format_geometry(
-                dataset.annotations_for_path(image_name, return_tensor=True), scores=False
-            )
+            # Predictions live in post-augmentation coordinates (the model
+            # ran on the val-transformed image — e.g. ``Resize: max_size=1024``
+            # downscales 2048-px tiles). Re-running ``dataset[idx]`` here gives
+            # us the same post-transform image and ground-truth that the model
+            # actually saw, so predictions / GT / image all share one
+            # coordinate space when rendered. Val transforms are deterministic
+            # so this is reproducible. Falls back to the on-disk raw image if
+            # we can't locate the index for any reason.
+            post_image = None
+            target_dict = None
+            idx_arr = np.where(dataset.image_names == image_name)[0]
+            if len(idx_arr) > 0:
+                try:
+                    image_tensor, target_dict, _ = dataset[int(idx_arr[0])]
+                    post_image = (
+                        (image_tensor.detach().cpu().permute(1, 2, 0).numpy() * 255)
+                        .clip(0, 255)
+                        .astype(np.uint8)
+                    )
+                except Exception as e:
+                    warnings.warn(
+                        f"Failed to rerun dataset transform for {image_name}: {e}",
+                        stacklevel=2,
+                    )
 
-            # Assume that validation images are un-augmented
+            if target_dict is not None:
+                targets = utilities.format_geometry(target_dict, scores=False)
+            else:
+                targets = utilities.format_geometry(
+                    dataset.annotations_for_path(image_name, return_tensor=True),
+                    scores=False,
+                )
+
+            if post_image is None:
+                try:
+                    post_image = np.array(
+                        Image.open(
+                            os.path.join(dataset.root_dir, image_name)
+                        ).convert("RGB")
+                    )
+                except Exception:
+                    post_image = None
+
             basename = Path(image_name).stem + f"_{trainer.global_step}"
             fig = visualize.plot_results(
                 basename=basename,
@@ -329,6 +367,7 @@ class ImagesCallback(Callback):
                 results_color=results_color,
                 thickness=self.thickness,
                 show=False,
+                image=post_image,
             )
             plt.close(fig)
 
@@ -363,19 +402,12 @@ class ImagesCallback(Callback):
             if pred_layer is not None:
                 layers.append(pred_layer)
 
-            try:
-                raw_image = np.array(
-                    Image.open(os.path.join(dataset.root_dir, image_name)).convert("RGB")
-                )
-            except Exception:
-                raw_image = None
-
             self._log_to_all(
                 image=os.path.join(out_dir, basename + ".png"),
                 trainer=trainer,
                 tag="prediction sample",
                 metadata=metadata,
-                raw_image=raw_image,
+                raw_image=post_image,
                 annotation_layers=layers or None,
             )
 

@@ -31,7 +31,9 @@ maskrcnn:
     rpn_post_nms_top_n_train: 1000
     rpn_pre_nms_top_n_test: 512
     rpn_post_nms_top_n_test: 512
-    gradient_checkpointing: true
+    # Steady-state CUDA peak is ~17 GB on 192 GB B200; recomputing
+    # activations in the backward isn't necessary here.
+    gradient_checkpointing: false
 
 gradient_clip_val: null
 precision: 16-mixed
