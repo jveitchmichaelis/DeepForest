@@ -1,6 +1,7 @@
 # entry point for deepforest model
 import importlib
 import os
+import time
 import warnings
 
 import numpy as np
@@ -919,8 +920,20 @@ class deepforest(pl.LightningModule):
 
         return losses
 
+    def on_train_epoch_start(self):
+        self._train_epoch_start = time.monotonic()
+        self.print(f"[epoch {self.current_epoch}] train start")
+
+    def on_train_epoch_end(self):
+        elapsed = time.monotonic() - getattr(
+            self, "_train_epoch_start", time.monotonic()
+        )
+        self.print(f"[epoch {self.current_epoch}] train end ({elapsed:.1f}s)")
+
     def on_validation_epoch_start(self):
         self.predictions = []
+        self._val_epoch_start = time.monotonic()
+        self.print(f"[epoch {self.current_epoch}] validation start")
 
     def _compute_epoch_metrics(self) -> dict:
         """Compute metrics and returns a Lightning-loggable dictionary.
@@ -968,6 +981,11 @@ class deepforest(pl.LightningModule):
         epoch."""
         if self.trainer.sanity_checking:  # optional skip
             return
+
+        elapsed = time.monotonic() - getattr(
+            self, "_val_epoch_start", time.monotonic()
+        )
+        self.print(f"[epoch {self.current_epoch}] validation end ({elapsed:.1f}s)")
 
         # Log epoch metrics
         if (self.current_epoch + 1) % self.config.validation.val_accuracy_interval == 0:

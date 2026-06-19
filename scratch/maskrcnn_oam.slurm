@@ -13,7 +13,8 @@
 printenv | grep -i slurm | sort
 
 export COMET_PROJECT="deepforest-maskrcnn"
+export PYTHONUNBUFFERED=1
 
 mkdir -p slurm_logs
 
-srun uv run deepforest --config-name oam train --comet --tag maskrcnn --tag oam-tcd "$@"
+srun --unbuffered uv run deepforest --config-name oam train --comet --tag maskrcnn --tag oam-tcd "$@"

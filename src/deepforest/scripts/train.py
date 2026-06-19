@@ -7,7 +7,11 @@ from pathlib import Path
 
 import torch
 from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning.callbacks import DeviceStatsMonitor, ModelCheckpoint
+from pytorch_lightning.callbacks import (
+    DeviceStatsMonitor,
+    ModelCheckpoint,
+    TQDMProgressBar,
+)
 from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
 
 from deepforest.callbacks import ImagesCallback, MemoryMonitorCallback
@@ -128,6 +132,9 @@ def train(
     )
 
     callbacks.append(MemoryMonitorCallback())
+
+    # Force tqdm-based progress bar
+    callbacks.append(TQDMProgressBar(refresh_rate=50))
 
     # Setup checkpoint to store in log directory
     if checkpoint:
