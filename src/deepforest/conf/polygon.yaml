@@ -63,4 +63,4 @@ validation:
 
     lr_plateau_target: val_loss
     iou_threshold: 0.4
-    val_accuracy_interval: 1
+    val_accuracy_interval: 5
