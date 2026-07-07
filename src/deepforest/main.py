@@ -1037,6 +1037,14 @@ class deepforest(pl.LightningModule):
             images = batch
             metadata = None
 
+        # filter batch to drop empty images
+        if self.config.skip_empty:
+            images, metadata = utilities.drop_empty_images(images, metadata)
+
+        # break early on empty batches
+        if len(images) == 0:
+            return []
+
         self.model.eval()
         with torch.no_grad():
             preds = self.model.forward(images)

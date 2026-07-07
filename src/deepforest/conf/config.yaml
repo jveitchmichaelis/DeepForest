@@ -41,6 +41,9 @@ annotations_xml:
 rgb_dir:
 path_to_rgb:
 
+# Skip prediction on tiles that are either all black/white, or nodata
+skip_empty: true
+
 log_root: ./lightning_logs
 
 train:

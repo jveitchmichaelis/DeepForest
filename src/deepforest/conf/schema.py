@@ -212,6 +212,9 @@ class Config:
     rgb_dir: str | None = None
     path_to_rgb: str | None = None
 
+    # Skip prediction on tiles that are all black/white or nodata
+    skip_empty: bool = True
+
     train: TrainConfig = field(default_factory=TrainConfig)
     validation: ValidationConfig = field(default_factory=ValidationConfig)
     predict: PredictConfig = field(default_factory=PredictConfig)
