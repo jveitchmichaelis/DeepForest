@@ -73,7 +73,6 @@ class deepforest(pl.LightningModule):
         self.existing_val_dataloader = existing_val_dataloader
 
         self.model = model
-        self.original_batch_structure = []
 
         if self.model is None:
             self.create_model()
@@ -714,7 +713,6 @@ class deepforest(pl.LightningModule):
                 results = self._gather_prediction_frames(image_results)
 
         elif dataloader_strategy == "batch":
-            self.original_batch_structure.clear()
             ds = prediction.MultiImage(
                 paths=paths,
                 patch_overlap=patch_overlap,
@@ -1030,9 +1028,6 @@ class deepforest(pl.LightningModule):
         if isinstance(batch, dict):
             images = batch["images"]
             metadata = batch.get("metadata")
-            batch_indices = batch.get("batch_indices")
-            if batch_indices is not None:
-                self.original_batch_structure.append(batch_indices)
         else:
             images = batch
             metadata = None

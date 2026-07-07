@@ -572,6 +572,39 @@ def test_predict_tile_batch_uses_global_image_indices(m, tmp_path):
     assert sorted(unique_paths) == expected_basenames
 
 
+def test_predict_step_assigns_metadata_in_order(m, monkeypatch):
+    """predict_step must zip each prediction to its own metadata so image_path
+    and window offsets stay correctly associated across a multi-image batch."""
+    metadata = [
+        {"image_path": "a.png", "window_bounds": (0, 0, 100, 100)},
+        {"image_path": "b.png", "window_bounds": (50, 0, 100, 100)},
+        {"image_path": "b.png", "window_bounds": (0, 60, 100, 100)},
+    ]
+    batch = {
+        "images": [torch.rand(3, 100, 100) for _ in metadata],
+        "metadata": metadata,
+    }
+
+    def fake_forward(images):
+        return [
+            {
+                "boxes": torch.tensor([[1.0, 2.0, 3.0, 4.0]]),
+                "labels": torch.tensor([0]),
+                "scores": torch.tensor([0.9]),
+            }
+            for _ in images
+        ]
+
+    monkeypatch.setattr(m.model, "forward", fake_forward)
+
+    results = m.predict_step(batch, 0)
+    assert len(results) == len(metadata)
+    for frame, meta in zip(results, metadata):
+        assert (frame["image_path"] == meta["image_path"]).all()
+        assert (frame["window_xmin"] == meta["window_bounds"][0]).all()
+        assert (frame["window_ymin"] == meta["window_bounds"][1]).all()
+
+
 # test equivalence for within and out of memory dataset strategies
 def test_predict_tile_equivalence(m):
     path = get_data("test_tiled.tif")
