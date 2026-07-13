@@ -978,6 +978,34 @@ def collate_fn(batch):
     return tuple(zip(*batch, strict=False))
 
 
+def drop_empty_images(images, metadata=None):
+    """Drop images that are all black, white or nodata from a batch.
+
+    An image is deemed empty when all its pixels share the same value.
+    When metadata is provided, the corresponding entries are dropped too
+    so the two stay aligned.
+
+    Args:
+        images: a list of image tensors or a stacked (B, C, H, W) tensor.
+        metadata: optional list of per-image metadata to filter alongside images.
+
+    Returns:
+        Tuple of (images, metadata) with empty images removed. metadata is None
+        if not supplied.
+    """
+    non_empty = [not torch.isclose(img.min(), img.max()) for img in images]
+
+    if isinstance(images, torch.Tensor):
+        images = images[torch.tensor(non_empty)]
+    else:
+        images = [img for img, keep in zip(images, non_empty, strict=True) if keep]
+
+    if metadata is not None:
+        metadata = [m for m, keep in zip(metadata, non_empty, strict=True) if keep]
+
+    return images, metadata
+
+
 def density_to_points(
     density_map,
     score_thresh: float = 0.1,

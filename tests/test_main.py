@@ -526,6 +526,47 @@ def test_predict_tile(m, path, dataloader_strategy):
     plot_results(prediction, show=False)
 
 
+@pytest.fixture()
+def batch_with_empty_image():
+    """A prediction batch with one real image and one empty (all-black) image."""
+    return {
+        "images": [torch.rand(3, 100, 100), torch.zeros(3, 100, 100)],
+        "metadata": [
+            {"image_path": "real.png", "window_bounds": (0, 0, 100, 100)},
+            {"image_path": "empty.png", "window_bounds": (100, 0, 100, 100)},
+        ],
+    }
+
+
+def test_predict_step_skips_empty_images(m, batch_with_empty_image):
+    m.config.skip_empty = True
+    results = m.predict_step(batch_with_empty_image, 0)
+
+    # Expect one result dataframe for the real image.
+    assert len(results) == 1
+
+
+def test_predict_step_keeps_empty_images_when_disabled(m, batch_with_empty_image):
+    m.config.skip_empty = False
+    results = m.predict_step(batch_with_empty_image, 0)
+
+    assert len(results) == len(batch_with_empty_image["images"])
+
+
+def test_predict_step_all_empty_returns_empty(m):
+    m.config.skip_empty = True
+    batch = {
+        "images": [torch.zeros(3, 100, 100), torch.ones(3, 100, 100)],
+        "metadata": [
+            {"image_path": "a.png", "window_bounds": (0, 0, 100, 100)},
+            {"image_path": "b.png", "window_bounds": (0, 0, 100, 100)},
+        ],
+    }
+
+    # Every image is empty, we also shouldn't crash
+    assert m.predict_step(batch, 0) == []
+
+
 # Add predict_tile for serial single dataloader strategy
 def test_predict_tile_serial_single(m):
     path1 = get_data("OSBS_029.png")

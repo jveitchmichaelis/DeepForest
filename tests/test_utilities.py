@@ -844,3 +844,35 @@ def test_read_file_column_names():
     assert "image_path" in result.columns
     assert "label" in result.columns
     assert hasattr(result, "root_dir")
+
+
+def test_drop_empty_images():
+    real = torch.rand(3, 8, 8)
+    images = [real, torch.zeros(3, 8, 8), torch.ones(3, 8, 8), torch.full((3, 8, 8), 0.5)]
+    metadata = ["real", "black", "white", "gray"]
+
+    filtered_images, filtered_metadata = utilities.drop_empty_images(images, metadata)
+
+    # Black, white and uniform-value images are dropped.
+    assert len(filtered_images) == 1
+    assert torch.equal(filtered_images[0], real)
+    assert filtered_metadata == ["real"]
+
+
+def test_drop_empty_images_preserves_tensor_type():
+    images = torch.stack([torch.rand(3, 8, 8), torch.zeros(3, 8, 8)])
+    filtered_images, filtered_metadata = utilities.drop_empty_images(images)
+
+    assert isinstance(filtered_images, torch.Tensor)
+    assert filtered_images.shape[0] == 1
+    assert filtered_metadata is None
+
+
+def test_drop_empty_images_tolerates_tiny_variation():
+    # A difference below floating point tolerance still counts as empty.
+    near_uniform = torch.full((3, 8, 8), 0.5)
+    near_uniform[0, 0, 0] = 0.5 + 1e-6
+
+    filtered_images, _ = utilities.drop_empty_images([near_uniform])
+
+    assert len(filtered_images) == 0
