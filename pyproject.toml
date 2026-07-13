@@ -53,7 +53,6 @@ dependencies = [
     "safetensors<0.6.0",
     "scikit-image>=0.25.2",
     "scipy>=1.15.3",
-    "setuptools",
     "shapely>2.0.0",
     "slidingwindow",
     "supervision",
