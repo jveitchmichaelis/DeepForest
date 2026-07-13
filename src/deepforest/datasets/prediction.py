@@ -1,7 +1,6 @@
 import os
 
 import numpy as np
-import pandas as pd
 import rasterio as rio
 import slidingwindow
 import torch
@@ -11,7 +10,7 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset
 
 from deepforest import preprocess
-from deepforest.utilities import format_geometry, read_file
+from deepforest.utilities import read_file
 
 
 # Base prediction class
@@ -119,62 +118,11 @@ class PredictionDataset(Dataset):
         raise NotImplementedError("Subclasses must implement this method")
 
     def get_metadata(self, idx):
-        """Get metadata needed to postprocess a prediction item."""
+        """Get metadata needed to format a prediction item."""
         return {
             "image_path": self.get_image_basename(idx),
             "window_bounds": self.get_crop_bounds(idx),
         }
-
-    def determine_geometry_type(self, batched_result):
-        """Determine the geometry type of the batched result."""
-        # Assumes that all geometries are the same in a batch
-        if "boxes" in batched_result.keys():
-            geom_type = "box"
-        elif "points" in batched_result.keys():
-            geom_type = "point"
-        elif "polygons" in batched_result.keys():
-            geom_type = "polygon"
-        else:
-            raise ValueError(
-                f"Unknown geometry type, prediction keys are {batched_result.keys()}"
-            )
-
-        return geom_type
-
-    def format_batch(self, batch, idx, sub_idx=None):
-        """Format a single prediction dict into a dataframe with metadata.
-
-        Args:
-            batch: A single prediction dict (keys: boxes, labels, scores, etc.)
-            idx: The dataset index (image index for windowed datasets)
-            sub_idx: The sub-index (window index). If None, uses idx.
-        """
-        if sub_idx is None:
-            sub_idx = idx
-        geom_type = self.determine_geometry_type(batch)
-        result = format_geometry(batch, geom_type=geom_type)
-        if result is None:
-            return None
-
-        crop_bounds = self.get_crop_bounds(sub_idx)
-        if crop_bounds is not None:
-            result["window_xmin"] = crop_bounds[0]
-            result["window_ymin"] = crop_bounds[1]
-        result["image_path"] = self.get_image_basename(idx)
-
-        return result
-
-    def postprocess(self, batch, prediction_index):
-        """Postprocess a single prediction result into a dataframe.
-
-        Args:
-            batch: A single prediction dict (keys: boxes, labels, scores, etc.)
-            prediction_index: The index of this item in the dataset
-        """
-        result = self.format_batch(batch, prediction_index)
-        if result is None:
-            return pd.DataFrame()
-        return result.reset_index(drop=True)
 
 
 class SingleImage(PredictionDataset):
@@ -252,33 +200,12 @@ class FromCSVFile(PredictionDataset):
     def get_crop_bounds(self, idx):
         return None
 
-    def format_batch(self, batch, idx, sub_idx=None):
-        """Format a single prediction dict into a dataframe with metadata.
-        Override of base class to skip window coordinates (not applicable for
-        full images).
 
-        Args:
-            batch: A single prediction dict (keys: boxes, labels, scores, etc.)
-            idx: The dataset index (image index)
-            sub_idx: Unused (kept for compatibility with base class signature)
-        """
-        geom_type = self.determine_geometry_type(batch)
-        result = format_geometry(batch, geom_type=geom_type)
-        if result is None:
-            return None
+class _CropsWithMetadata(list):
+    """List of crops with metadata attached for correct batch collation."""
 
-        result["image_path"] = self.get_image_basename(idx)
-
-        return result
-
-
-class _IndexedCrops(list):
-    """List of crops with the dataset index attached for correct batch
-    collation."""
-
-    def __init__(self, index: int, crops: list, metadata: list | None = None):
+    def __init__(self, crops: list, metadata: list | None = None):
         super().__init__(crops)
-        self.index = index
         self.metadata = metadata or []
 
 
@@ -304,7 +231,6 @@ class MultiImage(PredictionDataset):
         self.paths = paths
         self.patch_size = patch_size
         self.patch_overlap = patch_overlap
-        self.batch_indices = []
         self.return_metadata = return_metadata
 
         image = self.load_and_preprocess_image(image_path=self.paths[0])
@@ -393,33 +319,21 @@ class MultiImage(PredictionDataset):
         return windows
 
     def __getitem__(self, idx):
-        """Return crops with dataset index so collate_fn can use global
-        indices."""
+        """Return one image's crops with per-crop metadata attached."""
         crops = self.get_crop(idx)
         metadata = None
         if self.return_metadata:
             metadata = self.get_metadata(idx, crop_count=len(crops))
-        return _IndexedCrops(idx, crops, metadata=metadata)
+        return _CropsWithMetadata(crops, metadata=metadata)
 
     def collate_fn(self, batch):
-        """Collate the batch into a single list of crops.
-
-        Keep track of the lengths of each sublist using global dataset
-        indices (item.index), not batch position, so postprocess assigns
-        image_path correctly.
-        """
-        # item.index is the global dataset index; sublist is the list of crops
+        """Flatten each image's crop list into one batch, with metadata if
+        requested."""
+        flattened_batch = [crop for item in batch for crop in item]
         if self.return_metadata:
-            flattened_batch = [crop for item in batch for crop in item]
             metadata = [meta for item in batch for meta in item.metadata]
             return {"images": flattened_batch, "metadata": metadata}
-
-        batch_indices = [
-            [item.index, sub_idx] for item in batch for sub_idx in range(len(item))
-        ]
-        self.batch_indices.append(batch_indices)
-        flattened_batch = [crop for item in batch for crop in item]
-        return {"images": flattened_batch, "batch_indices": batch_indices}
+        return flattened_batch
 
     def __len__(self):
         return len(self.paths)
@@ -451,36 +365,6 @@ class MultiImage(PredictionDataset):
             }
             for window_idx in range(crop_count)
         ]
-
-    def postprocess(self, batch, prediction_index, original_batch_structure):
-        """Postprocess flattened batch of predictions from multiple images.
-
-        Args:
-            batch: List of prediction dicts (all windows from all images in batch)
-            prediction_index: Index of this batch from trainer.predict
-        """
-        if prediction_index >= len(original_batch_structure):
-            raise ValueError(
-                f"prediction_index {prediction_index} exceeds batch_indices length {len(original_batch_structure)}. "
-                "This may indicate a mismatch between collate_fn calls and postprocess calls."
-            )
-
-        current_batch_indices = original_batch_structure[prediction_index]
-        formatted_results = []
-
-        # current_batch_indices[i] = [image_idx, window_idx] corresponds to batch[i]
-        for batch_position, (image_idx, window_idx) in enumerate(current_batch_indices):
-            prediction = batch[batch_position]
-
-            # Format with correct image index and window index
-            result = self.format_batch(prediction, image_idx, window_idx)
-            if result is not None:
-                formatted_results.append(result)
-
-        if len(formatted_results) > 0:
-            return pd.concat(formatted_results).reset_index(drop=True)
-        else:
-            return pd.DataFrame()
 
 
 class TiledRaster(PredictionDataset):

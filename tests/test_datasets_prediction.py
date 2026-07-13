@@ -145,3 +145,28 @@ def test_MultiImage_metadata_batch():
     assert len(batch["images"]) == 4
     assert len(batch["metadata"]) == 4
     assert all(item["image_path"] == os.path.basename(path) for item in batch["metadata"])
+
+
+def test_MultiImage_collate_preserves_window_indexing():
+    """collate_fn must keep each crop tied to its source image and window when a
+    batch spans multiple images (both images are 400x400 so MultiImage accepts
+    them)."""
+    path_a = get_data("OSBS_029.png")
+    path_b = get_data("SOAP_031.png")
+    ds = MultiImage(
+        paths=[path_a, path_b],
+        patch_size=300,
+        patch_overlap=0,
+        return_metadata=True,
+    )
+
+    batch = ds.collate_fn([ds[0], ds[1]])  # a batch spanning both images
+    windows = ds.window_list()
+    n = len(windows)
+
+    assert len(batch["images"]) == len(batch["metadata"]) == 2 * n
+    expected = [(os.path.basename(path_a), w) for w in windows] + [
+        (os.path.basename(path_b), w) for w in windows
+    ]
+    actual = [(m["image_path"], m["window_bounds"]) for m in batch["metadata"]]
+    assert actual == expected
