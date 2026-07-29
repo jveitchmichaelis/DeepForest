@@ -17,7 +17,7 @@ num_classes: 2
 score_thresh: 0.2
 # Test-time NMS IoU threshold (the polygon default is 0.3).
 nms_thresh: 0.5
-detections_per_img: 512
+detections_per_img: 256
 
 maskrcnn:
     trainable_backbone_layers: 3
@@ -54,20 +54,18 @@ train:
     class_balanced_loss: false
     epochs: 100
     augmentations:
-        # Native-resolution 1024 crop: a window on the 2048 tile, so GSD
-        # stays 0.1 m/px. Train and eval must share one GSD -- a resize or
-        # downsample would change the crown scale the model sees.
+        # Native-resolution 1024 crop so GSD
+        # stays 0.1 m/px
         - HorizontalFlip: {p: 0.5}
         - VerticalFlip: {p: 0.5}
+        - RandomBrightnessContrast: {brightness: 0.25, contrast: 0.25, saturation: 0.25, hue: 0.0, p: 1.0}
+        - Rotate: {degrees: [0, 90], p: 0.5}
         - RandomCrop: {size: [1024, 1024], p: 1.0}
 
 validation:
     csv_file: data/tcd/test.json
     root_dir: data/tcd/test/images
     # Val step + segm mAP are expensive for this model; run every 5 epochs.
-    # Also gates ``check_val_every_n_epoch`` in the trainer.
     val_accuracy_interval: 5
-    # Full tiles at native 0.1 m/px, no resize: eval GSD must equal the
-    # training GSD (a Resize to 1024 would halve it to 0.2 m/px). Full-tile
-    # torchmetrics on 2048^2 masks is RAM-heavy.
+    # Eval at full resolution / 0.1 m/px GSD.
     augmentations: []
