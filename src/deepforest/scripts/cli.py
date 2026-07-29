@@ -106,6 +106,12 @@ def main():
     )
 
     evaluate_parser.add_argument(
+        "--checkpoint",
+        help="Path to a model checkpoint (.ckpt) to load weights from. The config "
+        "still comes from Hydra (--config-name plus any <key>=<value> overrides), "
+        "so it must be architecture-compatible with the checkpoint.",
+    )
+    evaluate_parser.add_argument(
         "--save-predictions",
         help="Path to save generated predictions CSV (only used when --predictions is not provided)",
     )
@@ -123,6 +129,14 @@ def main():
     )
 
     args, overrides = parser.parse_known_args()
+
+    # A positional (predict's ``input`` / evaluate's ``csv_file``) can capture a
+    # key=value Hydra override; move it back to the override list.
+    for attr in ("input", "csv_file"):
+        value = getattr(args, attr, None)
+        if isinstance(value, str) and "=" in value:
+            overrides.insert(0, value)
+            setattr(args, attr, None)
 
     if args.config_dir is not None:
         initialize_config_dir(version_base=None, config_dir=args.config_dir)
@@ -164,6 +178,7 @@ def main():
             root_dir=args.root_dir,
             output_path=args.output,
             save_predictions=args.save_predictions,
+            checkpoint=args.checkpoint,
         )
 
     elif args.command == "config":

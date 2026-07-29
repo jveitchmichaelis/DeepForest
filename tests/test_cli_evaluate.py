@@ -127,3 +127,28 @@ def test_cli_evaluate_subcommand(tmp_path):
 
     assert result.returncode == 0
     assert output_path.exists()
+
+
+def test_cli_evaluate_override_as_first_positional(tmp_path):
+    """A key=value override given without a positional csv is not treated as a file."""
+    csv_file = get_data("OSBS_029.csv")
+    root_dir = os.path.dirname(csv_file)
+    output_path = tmp_path / "cli_eval.csv"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            SCRIPT,
+            "evaluate",
+            "-o",
+            str(output_path),
+            f"validation.csv_file={csv_file}",
+            f"validation.root_dir={root_dir}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.returncode == 0
+    assert output_path.exists()
