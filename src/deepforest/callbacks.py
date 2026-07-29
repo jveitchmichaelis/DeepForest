@@ -383,7 +383,8 @@ class ImagesCallback(Callback):
                 .to_dict()
             )
 
-            metadata = {"pred_count": len(pred_df), "gt_count": len(targets)}
+            gt_count = len(targets) if targets is not None else 0
+            metadata = {"pred_count": len(pred_df), "gt_count": gt_count}
             metadata.update(stats)
 
             with open(os.path.join(out_dir, basename + ".json"), "w") as fp:

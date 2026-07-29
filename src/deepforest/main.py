@@ -1080,8 +1080,7 @@ class deepforest(pl.LightningModule):
         Matches Detectron2's ``WEIGHT_DECAY_NORM=0.0`` recipe: BatchNorm /
         GroupNorm / LayerNorm scale and shift parameters are placed in a
         zero-decay group; everything else (including biases, conv and
-        linear weights) uses the standard decay. Important for the v2
-        Mask R-CNN heads, which add BN to ``box_head`` and ``mask_head``.
+        linear weights) uses the standard decay.
 
         Falls back to ``self.model.parameters()`` when no norm-layer
         parameters are found, preserving current behaviour for
@@ -1252,6 +1251,34 @@ class deepforest(pl.LightningModule):
         else:
             return optimizer
 
+    def collect_predictions(self) -> pd.DataFrame:
+        """Concatenate the predictions gathered during the last validation run.
+
+        ``validation_step`` appends a per-image dataframe to ``self.predictions``.
+        This gathers them across ranks under DDP, concatenates, and maps numeric
+        labels back to their string names.
+
+        Returns:
+            pd.DataFrame: all predictions with string labels, empty if none.
+        """
+        predictions = self.predictions
+
+        # Gather predictions from all ranks in multi-GPU settings
+        if self.trainer.world_size > 1:
+            all_predictions = [None] * self.trainer.world_size
+            torch.distributed.all_gather_object(all_predictions, predictions)
+            predictions = [pred for preds in all_predictions for pred in preds]
+
+        if len(predictions) == 0:
+            return pd.DataFrame()
+
+        predictions = pd.concat(predictions, ignore_index=True)
+        if "label" in predictions.columns:
+            predictions["label"] = predictions["label"].map(
+                lambda x: self.numeric_to_label_dict.get(int(x), x) if pd.notna(x) else x
+            )
+        return predictions
+
     def evaluate(
         self,
         csv_file,
@@ -1292,23 +1319,7 @@ class deepforest(pl.LightningModule):
         self.create_trainer()
         self.trainer.validate(self)
 
-        # Gather predictions from all ranks in multi-GPU settings
-        if self.trainer.world_size > 1:
-            all_predictions = [None] * self.trainer.world_size
-            torch.distributed.all_gather_object(all_predictions, self.predictions)
-            self.predictions = [pred for preds in all_predictions for pred in preds]
-
-        # Concat prediction dataframes and convert numeric labels to strings
-        if len(self.predictions) > 0:
-            self.predictions = pd.concat(self.predictions, ignore_index=True)
-            if "label" in self.predictions.columns:
-                self.predictions["label"] = self.predictions["label"].map(
-                    lambda x: (
-                        self.numeric_to_label_dict.get(int(x), x) if pd.notna(x) else x
-                    )
-                )
-        else:
-            self.predictions = pd.DataFrame()
+        self.predictions = self.collect_predictions()
 
         results = {}
         results.update(self.trainer.logged_metrics)

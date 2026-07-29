@@ -247,16 +247,14 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         # predictors. We use the factory's backbone module directly and
         # copy the rest of the weights via ``load_state_dict`` after
         # ``super().__init__`` builds our architectural shell.
+
         pretrained_full = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(
             **factory_kwargs
         )
 
-        # Reuse the v2 factory's RPN / box / mask head modules so the
-        # internal architecture matches the pretrained state_dict shape
-        # (``maskrcnn_resnet50_fpn_v2`` differs from base ``MaskRCNN``
-        # defaults — RPNHead has ``conv_depth=2``, ``FastRCNNConvFCHead``
-        # replaces ``TwoMLPHead``, and ``MaskRCNNHeads`` uses BN).
-        v2_head_kwargs = {
+        # Reuse the factory's RPN / box / mask head modules so the internal
+        # architecture matches the pretrained state_dict shape.
+        head_kwargs = {
             "rpn_anchor_generator": pretrained_full.rpn.anchor_generator,
             "rpn_head": pretrained_full.rpn.head,
             "box_head": pretrained_full.roi_heads.box_head,
@@ -270,7 +268,7 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
                 num_classes=num_classes + 1,
                 box_nms_thresh=nms_thresh,
                 box_score_thresh=score_thresh,
-                **v2_head_kwargs,
+                **head_kwargs,
                 **kwargs,
             )
         else:
@@ -289,7 +287,7 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
                 num_classes=coco_num_classes_ext,
                 box_nms_thresh=nms_thresh,
                 box_score_thresh=score_thresh,
-                **v2_head_kwargs,
+                **head_kwargs,
                 **kwargs,
             )
             self.load_state_dict(pretrained_state)
