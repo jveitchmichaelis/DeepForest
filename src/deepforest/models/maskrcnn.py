@@ -350,6 +350,19 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         torch.nn.init.constant_(box_predictor.cls_score.bias, 0)
         torch.nn.init.constant_(box_predictor.bbox_pred.bias, 0)
 
+    def apply_class_balanced_loss(self, annotations, label_dict: dict[str, int]) -> None:
+        """Enable inverse-frequency classifier-CE weighting from train annotations.
+
+        Args:
+            annotations: DataFrame with a ``label`` column (e.g. produced by
+                ``utilities.read_file``).
+            label_dict: Mapping of string label to zero-indexed foreground id.
+        """
+        from deepforest.datasets.sampling import compute_class_loss_weights
+
+        weights = compute_class_loss_weights(annotations, label_dict, self.num_classes)
+        set_loss_class_weights(weights)
+
     @classmethod
     def from_pretrained(
         cls, pretrained_model_name_or_path, *, num_classes=None, label_dict=None, **kwargs

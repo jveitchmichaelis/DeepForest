@@ -87,6 +87,8 @@ class TrainConfig:
     preload_images: bool = False
     validate_coordinates: bool = True
     augmentations: list[str] | None = field(default_factory=lambda: ["HorizontalFlip"])
+    class_balanced_loss: bool = False
+    class_balanced_sampler: bool = False
 
 
 @dataclass
