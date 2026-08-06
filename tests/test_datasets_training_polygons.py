@@ -35,15 +35,18 @@ def test_polygon_dataset_basic(polygon_annotation_file, polygon_root_dir):
     assert image.min() >= 0
     assert image.max() <= 1
 
-    # Targets parallel the box workflow with an added masks entry
-    assert set(targets.keys()) == {"boxes", "labels", "masks"}
+    # Targets parallel the box workflow, with the instance masks carried
+    # in panoptic form rather than as a dense (N, H, W) stack.
+    assert set(targets.keys()) == {"boxes", "labels", "panoptic_masks", "unique_ids"}
     assert targets["boxes"].shape[-1] == 4
     assert targets["labels"].dtype == torch.int64
-    assert targets["masks"].dtype == torch.uint8
 
-    # One mask per instance, matching the augmented image size
-    assert targets["masks"].shape[0] == targets["boxes"].shape[0]
-    assert targets["masks"].shape[-2:] == image.shape[-2:]
+    # One instance id per box, over a single map the size of the image
+    assert targets["panoptic_masks"].shape == image.shape[-2:]
+    assert targets["unique_ids"].shape[0] == targets["boxes"].shape[0]
+
+    # Ids are one-based; 0 is background
+    assert targets["unique_ids"].min() >= 1
 
     # Labels are zero-indexed like the box and point workflows
     assert targets["labels"].min() >= 0
@@ -94,7 +97,7 @@ def test_polygon_dataset_collate(polygon_annotation_file, polygon_root_dir):
     images, targets, image_names = ds.collate_fn(batch)
 
     assert len(images) == len(targets) == len(image_names) == 2
-    assert all("masks" in t for t in targets)
+    assert all("panoptic_masks" in t and "unique_ids" in t for t in targets)
 
 
 def test_polygon_oob_coordinates(tmp_path, polygon_root_dir):

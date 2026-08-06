@@ -289,7 +289,6 @@ class deepforest(pl.LightningModule):
             "callbacks": callbacks,
             "limit_val_batches": limit_val_batches,
             "num_sanity_val_steps": num_sanity_val_steps,
-            "check_val_every_n_epoch": self.config.validation.val_accuracy_interval,
             "default_root_dir": self.config.log_root,
         }
         if self.config.precision is not None:

@@ -585,10 +585,14 @@ class PolygonDataset(TrainingDataset):
     """Dataset for instance segmentation with polygon masks.
 
     Parallels :class:`BoxDataset` but additionally rasterizes each
-    polygon geometry into a binary instance mask. Targets contain
-    ``boxes`` (the polygon bounds), ``labels`` and ``masks`` for use
-    with Mask R-CNN. Labels are zero-indexed to match the box and point
-    workflows.
+    polygon geometry into an instance mask. Targets contain ``boxes``
+    (the polygon bounds), ``labels``, and the instance masks in
+    panoptic form: ``panoptic_masks`` is a single (H, W) map of
+    one-based instance ids and ``unique_ids`` lists the ids that
+    survived augmentation, in the same order as ``boxes`` and
+    ``labels``. Consumers redecode the (N, H, W) stack on device, which
+    keeps large tiles out of worker memory. Labels are zero-indexed to
+    match the box and point workflows.
     """
 
     _data_keys = [DataKey.IMAGE, DataKey.BBOX_XYXY, DataKey.MASK]
