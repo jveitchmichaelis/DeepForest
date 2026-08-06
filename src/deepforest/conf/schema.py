@@ -34,6 +34,10 @@ class SchedulerParamsConfig:
     cooldown: int = 0
     min_lr: float = 0.0
     eps: float = 1e-8
+    # Linear LR warmup prefix for multistepLR. Detectron2 uses 1000 iters
+    # (~1 epoch at bs=8 on OAM-TCD). Set to 0 to disable.
+    warmup_epochs: int = 0
+    warmup_start_factor: float = 0.001
 
 
 @dataclass
@@ -163,18 +167,54 @@ class PointConfig:
 
 
 @dataclass
+class MaskRCNNConfig:
+    """Mask R-CNN specific knobs not shared with other architectures.
+
+    ``trainable_backbone_layers`` follows the torchvision convention: 0
+    freezes the whole backbone, 5 trains all of it. ``=3`` is the
+    closest analog to Detectron2's ``FREEZE_AT: 2`` used in the OAM-TCD
+    paper (freezes stem + layer1).
+
+    ``gradient_checkpointing`` wraps the ResNet body's layer2-4 in
+    activation checkpointing — halves forward activation memory in
+    exchange for ~20-30% slower backward. Headroom for larger batches.
+
+    ``inference_output`` picks the eval-mode output format. ``dense``
+    preserves the torchvision default (per-instance ``(N, 1, H, W)``
+    masks) and is what the validation mAP metric expects. ``polygons``
+    vectorises masks immediately after the forward (via
+    ``cv2.findContours``) and drops the dense tensor — useful for
+    ``predict_image`` / ``predict_tile`` where the raw mask tensor
+    can dominate output memory.
+    """
+
+    trainable_backbone_layers: int | None = None
+    # Detectron2 uses pre_train=2000, post_train=1000; torchvision defaults
+    # to 2000 for both. Surface them so OAM-TCD can override post_train=1000
+    # to match the paper's ROI candidate distribution.
+    rpn_pre_nms_top_n_train: int = 2000
+    rpn_post_nms_top_n_train: int = 2000
+    rpn_pre_nms_top_n_test: int = 1000
+    rpn_post_nms_top_n_test: int = 1000
+    gradient_checkpointing: bool = False
+    inference_output: str = "dense"  # one of: "dense", "polygons"
+
+
+@dataclass
 class Config:
     """General DeepForest configuration.
 
     Some parameters here are shared between dataloaders, for example the
     batch size, accelerator and number of workers.
 
-    Here we also set the architecture, which can be one of "retinanet"
-    or "DeformableDetr" currently. If you modify the number of classes
-    or label dict from what is loaded from the hub, it's assumed that
-    you intend to fine-tune or otherwise train the model. In this case,
-    the model will be adapted to fit your configuration by, for example,
-    adjusting the number of classification heads.
+    Here we also set the architecture, which can be one of "retinanet",
+    "DeformableDetr" (box), "treeformer" (point), or "maskrcnn"
+    (polygon) currently. The model's task (box, point or polygon)
+    follows from the chosen architecture. If you modify the number of
+    classes or label dict from what is loaded from the hub, it's assumed
+    that you intend to fine-tune or otherwise train the model. In this
+    case, the model will be adapted to fit your configuration by, for
+    example, adjusting the number of classification heads.
 
     For most users the default setting of 1-class, "tree" should be
     sufficient.
@@ -202,6 +242,8 @@ class Config:
     topk_candidates: int = 1000
     model: ModelConfig = field(default_factory=ModelConfig)
 
+    gradient_clip_val: float | None = 0.5
+
     log_root: str = "./lightning_logs"
 
     # Preprocessing
@@ -220,3 +262,4 @@ class Config:
     predict: PredictConfig = field(default_factory=PredictConfig)
     cropmodel: CropModelConfig = field(default_factory=CropModelConfig)
     point: PointConfig = field(default_factory=PointConfig)
+    maskrcnn: MaskRCNNConfig = field(default_factory=MaskRCNNConfig)
