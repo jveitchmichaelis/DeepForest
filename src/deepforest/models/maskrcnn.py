@@ -351,7 +351,8 @@ class MaskRCNN(_TorchvisionMaskRCNN, PyTorchModelHubMixin):
         torch.nn.init.constant_(box_predictor.bbox_pred.bias, 0)
 
     def apply_class_balanced_loss(self, annotations, label_dict: dict[str, int]) -> None:
-        """Enable inverse-frequency classifier-CE weighting from train annotations.
+        """Enable inverse-frequency classifier-CE weighting from train
+        annotations.
 
         Args:
             annotations: DataFrame with a ``label`` column (e.g. produced by

@@ -28,10 +28,10 @@ def _df_to_comet_annotations(
 ) -> dict | None:
     """Convert an annotation DataFrame to a Comet annotation layer.
 
-    Each row's shapely ``geometry`` becomes either a ``boxes`` entry (for
-    axis-aligned rectangles) or a ``points`` entry (flattened polygon
-    coordinates). Returns ``None`` when there is nothing to log so the
-    caller can drop empty layers.
+    Each row's shapely ``geometry`` becomes either a ``boxes`` entry
+    (for axis-aligned rectangles) or a ``points`` entry (flattened
+    polygon coordinates). Returns ``None`` when there is nothing to log
+    so the caller can drop empty layers.
     """
     if df is None or len(df) == 0 or "geometry" not in df.columns:
         return None
@@ -360,9 +360,9 @@ class ImagesCallback(Callback):
             if post_image is None:
                 try:
                     post_image = np.array(
-                        Image.open(
-                            os.path.join(dataset.root_dir, image_name)
-                        ).convert("RGB")
+                        Image.open(os.path.join(dataset.root_dir, image_name)).convert(
+                            "RGB"
+                        )
                     )
                 except Exception:
                     post_image = None
@@ -432,10 +432,11 @@ class ImagesCallback(Callback):
     ):
         """Log to all connected loggers.
 
-        TensorBoard receives the pre-rendered PNG so the matplotlib overlay
-        is visible inline. Comet receives the raw (unannotated) image with
-        ``annotations`` so boxes / polygons render as interactive native
-        overlays (see Comet's log_image annotations API).
+        TensorBoard receives the pre-rendered PNG so the matplotlib
+        overlay is visible inline. Comet receives the raw (unannotated)
+        image with ``annotations`` so boxes / polygons render as
+        interactive native overlays (see Comet's log_image annotations
+        API).
         """
         try:
             img = np.array(Image.open(image).convert("RGB"))
