@@ -436,9 +436,10 @@ def format_boxes(prediction, scores=True):
 def mask_to_polygon(mask: np.ndarray) -> shapely.geometry.Polygon:
     """Convert a single binary instance mask to a Shapely polygon.
 
-    The largest external contour is used. Masks that do not contain a
-    valid contour (fewer than three vertices) return an empty polygon.
-    Self intersecting polygons are replaced by their convex hull.
+    The largest outer contour is used, along with any holes inside it. Masks
+    that do not contain a valid contour (fewer than three vertices)
+    return an empty polygon. Self intersecting polygons are repaired with
+    a zero-width buffer, which preserves concavity.
 
     Args:
         mask: 2D array where non-zero pixels mark the instance.
@@ -447,24 +448,48 @@ def mask_to_polygon(mask: np.ndarray) -> shapely.geometry.Polygon:
         A Shapely Polygon of the instance boundary, or an empty Polygon.
     """
     mask = (mask > 0).astype(np.uint8)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # RETR_CCOMP returns a two level hierarchy: outer contours, then the
+    # holes belonging to them.
+    contours, hierarchy = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
         return shapely.geometry.Polygon()
 
-    largest = max(contours, key=cv2.contourArea)
-    coords = largest.reshape(-1, 2)
-    if coords.shape[0] < 3:
+    # hierarchy entries are [next, previous, first_child, parent]
+    outer = [i for i, node in enumerate(hierarchy[0]) if node[3] == -1]
+    if not outer:
         return shapely.geometry.Polygon()
 
-    polygon = shapely.geometry.Polygon(coords)
+    largest = max(outer, key=lambda i: cv2.contourArea(contours[i]))
+    shell = contours[largest].reshape(-1, 2)
+    if shell.shape[0] < 3:
+        return shapely.geometry.Polygon()
+
+    holes = [
+        contours[i].reshape(-1, 2)
+        for i, node in enumerate(hierarchy[0])
+        if node[3] == largest and len(contours[i]) >= 3
+    ]
+
+    polygon = shapely.geometry.Polygon(shell, holes)
     if not polygon.is_valid:
-        polygon = polygon.convex_hull
-        # Edge cases like collinear points may map to a line
-        if polygon.geom_type != "Polygon":
-            return shapely.geometry.Polygon()
+        polygon = _reduce_polygon_to_largest(polygon.buffer(0))
 
     return polygon
+
+
+def _reduce_polygon_to_largest(geom) -> shapely.geometry.Polygon:
+    """Reduce a repaired geometry to its largest Polygon component."""
+    if geom.is_empty:
+        return shapely.geometry.Polygon()
+    if geom.geom_type == "Polygon":
+        return geom
+
+    parts = [g for g in getattr(geom, "geoms", []) if g.geom_type == "Polygon"]
+    if not parts:
+        return shapely.geometry.Polygon()
+
+    return max(parts, key=lambda g: g.area)
 
 
 def format_polygons(prediction: dict, scores: bool = True) -> pd.DataFrame | None:
@@ -608,7 +633,12 @@ def read_coco(json_file):
 
                 poly = shapely.geometry.Polygon(coords)
 
-                if poly.is_valid and not poly.is_empty:
+                # Repair self-intersections rather than dropping the
+                # instance, which would leave unlabelled ground truth.
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+
+                if not poly.is_empty:
                     poly_list.append(poly)
 
             if not poly_list:

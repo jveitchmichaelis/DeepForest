@@ -880,7 +880,7 @@ def test_mask_to_polygon_degenerate(mask):
 
 
 def test_mask_to_polygon_repairs_self_intersection():
-    """A self-intersecting contour is replaced by its convex hull."""
+    """A self-intersecting contour is repaired without inflating it."""
     # Bowtie shape, which is not a valid polygon.
     mask = np.zeros((40, 40), dtype=np.uint8)
     mask[5:18, 5:18] = 1
@@ -891,8 +891,23 @@ def test_mask_to_polygon_repairs_self_intersection():
     # A single valid polygon comes out
     assert result.geom_type == "Polygon"
     assert result.is_valid
-    # The hull should cover more than the area of the two regions
-    assert result.area > mask.sum()
+    # A convex hull would span both lobes and exceed the masked area.
+    assert result.area <= mask.sum()
+
+
+def test_mask_to_polygon_keeps_holes():
+    """Gaps enclosed by an instance are kept, not filled in."""
+    mask = np.zeros((100, 100), dtype=np.uint8)
+    mask[20:80, 20:80] = 1
+    mask[40:60, 40:60] = 0
+
+    polygon = utilities.mask_to_polygon(mask)
+
+    assert polygon.is_valid
+    assert len(polygon.interiors) == 1
+    # Filling the hole would add ~400 px to the area.
+    assert polygon.area < mask.sum() + 400
+    assert not polygon.contains(shapely.geometry.Point(50, 50))
 
 
 def test_format_polygons_targets_without_scores():

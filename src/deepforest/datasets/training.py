@@ -699,19 +699,37 @@ class PolygonDataset(TrainingDataset):
             geom = shapely.wkt.loads(geom)
 
         if geom.geom_type == "Polygon":
-            coords = np.array(geom.exterior.coords, dtype=np.int32)
-            cv2.fillPoly(out, [coords], color=value)
-        elif geom.geom_type == "MultiPolygon":
-            for poly in geom.geoms:
-                if not poly.is_empty:
-                    coords = np.array(poly.exterior.coords, dtype=np.int32)
-                    cv2.fillPoly(out, [coords], color=value)
-        elif geom.geom_type == "GeometryCollection":
+            polygons = [geom]
+        elif geom.geom_type in ("MultiPolygon", "GeometryCollection"):
             # unary_union of touching polygons can produce a GeometryCollection
-            for sub in geom.geoms:
-                if sub.geom_type == "Polygon" and not sub.is_empty:
-                    coords = np.array(sub.exterior.coords, dtype=np.int32)
-                    cv2.fillPoly(out, [coords], color=value)
+            polygons = [
+                sub
+                for sub in geom.geoms
+                if sub.geom_type == "Polygon" and not sub.is_empty
+            ]
+        else:
+            return
+
+        shells = [
+            np.array(poly.exterior.coords, dtype=np.int32)
+            for poly in polygons
+            if not poly.is_empty
+        ]
+        if not shells:
+            return
+
+        if not any(poly.interiors for poly in polygons):
+            cv2.fillPoly(out, shells, color=value)
+            return
+
+        # Holes must not clobber pixels belonging to instances already drawn
+        scratch = np.zeros(out.shape, dtype=np.uint8)
+        cv2.fillPoly(scratch, shells, color=1)
+        for poly in polygons:
+            for ring in poly.interiors:
+                coords = np.array(ring.coords, dtype=np.int32)
+                cv2.fillPoly(scratch, [coords], color=0)
+        out[scratch > 0] = value
 
     def targets_for_path(self, image_path, return_tensor=False) -> dict:
         """Construct target dictionary for a given image path.
