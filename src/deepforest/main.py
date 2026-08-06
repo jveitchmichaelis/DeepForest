@@ -393,6 +393,7 @@ class deepforest(pl.LightningModule):
         transforms=None,
         augmentations=None,
         preload_images=False,
+        preload_annotations=False,
         validate_coordinates=True,
         batch_size=1,
         sampler=None,
@@ -410,6 +411,7 @@ class deepforest(pl.LightningModule):
             transforms: Albumentations transforms
             batch_size: batch size
             preload_images: if True, preload the images into memory
+            preload_annotations: if True, group annotations by image on construction
             validate_coordinates: if True, check annotation coordinates fall within image bounds
             augmentations: augmentation configuration (str, list, or dict)
             sampler: optional torch Sampler. When given it replaces shuffling.
@@ -427,6 +429,7 @@ class deepforest(pl.LightningModule):
                 label_dict=self.label_dict,
                 augmentations=augmentations,
                 preload_images=preload_images,
+                preload_annotations=preload_annotations,
                 validate_coordinates=validate_coordinates,
             )
         elif self.model.task == "point":
@@ -437,6 +440,7 @@ class deepforest(pl.LightningModule):
                 label_dict=self.label_dict,
                 augmentations=augmentations,
                 preload_images=preload_images,
+                preload_annotations=preload_annotations,
                 validate_coordinates=validate_coordinates,
             )
         elif self.model.task == "polygon":
@@ -447,6 +451,7 @@ class deepforest(pl.LightningModule):
                 label_dict=self.label_dict,
                 augmentations=augmentations,
                 preload_images=preload_images,
+                preload_annotations=preload_annotations,
                 validate_coordinates=validate_coordinates,
             )
         else:
@@ -505,6 +510,7 @@ class deepforest(pl.LightningModule):
             root_dir=self.config.train.root_dir,
             augmentations=self.config.train.augmentations,
             preload_images=self.config.train.preload_images,
+            preload_annotations=self.config.train.preload_annotations,
             validate_coordinates=self.config.train.validate_coordinates,
             shuffle=True,
             transforms=self.transforms,
@@ -534,6 +540,7 @@ class deepforest(pl.LightningModule):
                 augmentations=self.config.validation.augmentations,
                 shuffle=False,
                 preload_images=self.config.validation.preload_images,
+                preload_annotations=self.config.validation.preload_annotations,
                 validate_coordinates=self.config.validation.validate_coordinates,
                 batch_size=self.config.batch_size,
             )

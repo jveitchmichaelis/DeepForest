@@ -85,6 +85,7 @@ class TrainConfig:
     epochs: int = 1
     fast_dev_run: bool = False
     preload_images: bool = False
+    preload_annotations: bool = False
     validate_coordinates: bool = True
     augmentations: list[str] | None = field(default_factory=lambda: ["HorizontalFlip"])
     class_balanced_loss: bool = False
@@ -105,6 +106,7 @@ class ValidationConfig:
     csv_file: str | None = None
     root_dir: str | None = None
     preload_images: bool = False
+    preload_annotations: bool = False
     validate_coordinates: bool = True
     size: int | None = None
     iou_threshold: float = 0.4

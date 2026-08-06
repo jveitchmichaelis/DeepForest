@@ -6,6 +6,7 @@ from abc import abstractmethod
 from typing import Any
 
 import cv2
+import geopandas as gpd
 import kornia.augmentation as K
 import numpy as np
 import shapely
@@ -15,6 +16,7 @@ from kornia.constants import DataKey
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.datasets import ImageFolder
+from tqdm import tqdm
 
 from deepforest import utilities
 from deepforest.augmentations import get_transform
@@ -32,6 +34,7 @@ class TrainingDataset(Dataset):
         augmentations=None,
         label_dict=None,
         preload_images=False,
+        preload_annotations=False,
         validate_coordinates=True,
     ):
         """
@@ -42,6 +45,7 @@ class TrainingDataset(Dataset):
             label_dict (dict[str, int]): Mapping from string labels in the CSV to integer class IDs (e.g., {"Tree": 0}).
             augmentations (str | list | dict, optional): Augmentation configuration.
             preload_images (bool): If True, preload all images into memory. Defaults to False.
+            preload_annotations (bool): If True, group annotations by image at startup. Defaults to False.
             validate_coordinates (bool): If True, check that all annotation coordinates fall
                 within image bounds before training. Defaults to True.
         """
@@ -66,6 +70,11 @@ class TrainingDataset(Dataset):
 
         self.image_names = self.annotations.image_path.unique()
         self.preload_images = preload_images
+        self.annotation_groups = (
+            dict(tuple(self.annotations.groupby("image_path")))
+            if preload_annotations
+            else None
+        )
 
         self._validate_labels()
         if validate_coordinates:
@@ -124,8 +133,14 @@ class TrainingDataset(Dataset):
         image = image.astype("float32")
         return image
 
+    def annotations_for_path(self, image_path: str) -> gpd.GeoDataFrame:
+        """Return the raw annotation rows for one image."""
+        if self.annotation_groups is not None:
+            return self.annotation_groups[image_path]
+        return self.annotations[self.annotations.image_path == image_path]
+
     @abstractmethod
-    def annotations_for_path(self, image_path, return_tensor=False) -> Any:
+    def targets_for_path(self, image_path, return_tensor=False) -> Any:
         """Construct target dictionary for a given image path, optionally
         convert to tensor."""
 
@@ -145,7 +160,11 @@ class BoxDataset(TrainingDataset):
             ValueError: If any bounding box coordinate occurs outside the image
         """
         errors = []
-        for image_path, group in self.annotations.groupby("image_path"):
+        for image_path, group in tqdm(
+            self.annotations.groupby("image_path"),
+            desc="Validating boxes",
+            unit="image",
+        ):
             img_path = os.path.join(self.root_dir, image_path)
             try:
                 with Image.open(img_path) as img:
@@ -214,7 +233,7 @@ class BoxDataset(TrainingDataset):
 
         return boxes[valid_mask], labels[valid_mask]
 
-    def annotations_for_path(self, image_path, return_tensor=False) -> dict:
+    def targets_for_path(self, image_path, return_tensor=False) -> dict:
         """Construct target dictionary for a given image path, optionally
         convert to tensor.
 
@@ -225,7 +244,7 @@ class BoxDataset(TrainingDataset):
         Returns:
             target dictionary with boxes and labels entries
         """
-        image_annotations = self.annotations[self.annotations.image_path == image_path]
+        image_annotations = self.annotations_for_path(image_path)
         targets = {}
 
         if "geometry" in image_annotations.columns:
@@ -259,7 +278,7 @@ class BoxDataset(TrainingDataset):
         else:
             image = self.load_image(idx)
 
-        targets = self.annotations_for_path(self.image_names[idx])
+        targets = self.targets_for_path(self.image_names[idx])
 
         # If image has no annotations, add a dummy
         if np.sum(targets["boxes"]) == 0:
@@ -312,6 +331,7 @@ class PointDataset(TrainingDataset):
         augmentations=None,
         label_dict=None,
         preload_images=False,
+        preload_annotations=False,
         validate_coordinates=True,
         density_sigma=4.0,
         output="centroid",
@@ -335,6 +355,8 @@ class PointDataset(TrainingDataset):
             label_dict (dict[str, int]): Mapping from string labels in the CSV to integer class IDs (e.g., {"Tree": 0}).
             augmentations (str | list | dict, optional): Augmentation configuration.
             preload_images (bool): If True, preload all images into memory. Defaults to False.
+            preload_annotations (bool): If True, group annotations by image at startup
+                instead of scanning on each access. Defaults to False.
             validate_coordinates (bool): If True, check that all annotation coordinates fall
                 within image bounds. Defaults to True.
             density_sigma (float): Standard deviation of the Gaussian kernel for density map generation. Defaults to 4.0.
@@ -347,6 +369,7 @@ class PointDataset(TrainingDataset):
             augmentations=augmentations,
             label_dict=label_dict,
             preload_images=preload_images,
+            preload_annotations=preload_annotations,
             validate_coordinates=validate_coordinates,
         )
 
@@ -365,7 +388,12 @@ class PointDataset(TrainingDataset):
             ValueError: If any point occurs outside the image
         """
         errors = []
-        for _idx, row in self.annotations.iterrows():
+        for _idx, row in tqdm(
+            self.annotations.iterrows(),
+            total=len(self.annotations),
+            desc="Validating points",
+            unit="annotation",
+        ):
             img_path = os.path.join(self.root_dir, row["image_path"])
             try:
                 with Image.open(img_path) as img:
@@ -422,7 +450,7 @@ class PointDataset(TrainingDataset):
 
         return points[valid_mask], labels[valid_mask]
 
-    def annotations_for_path(self, image_path, return_tensor=False) -> dict:
+    def targets_for_path(self, image_path, return_tensor=False) -> dict:
         """Construct target dictionary for a given image path, optionally
         convert to tensor.
 
@@ -433,7 +461,7 @@ class PointDataset(TrainingDataset):
         Returns:
             target dictionary with points and labels entries
         """
-        image_annotations = self.annotations[self.annotations.image_path == image_path]
+        image_annotations = self.annotations_for_path(image_path)
         targets = {}
 
         if "geometry" in image_annotations.columns:
@@ -535,7 +563,7 @@ class PointDataset(TrainingDataset):
         else:
             image = self.load_image(idx)
 
-        targets = self.annotations_for_path(self.image_names[idx])
+        targets = self.targets_for_path(self.image_names[idx])
 
         # Dummy annotations for empty image
         if np.sum(targets["points"]) == 0:
@@ -604,7 +632,11 @@ class PolygonDataset(TrainingDataset):
             ValueError: If any polygon is invalid or exceeds image bounds.
         """
         errors = []
-        for image_path, group in self.annotations.groupby("image_path"):
+        for image_path, group in tqdm(
+            self.annotations.groupby("image_path"),
+            desc="Validating polygons",
+            unit="image",
+        ):
             img_path = os.path.join(self.root_dir, image_path)
             try:
                 with Image.open(img_path) as img:
@@ -681,7 +713,7 @@ class PolygonDataset(TrainingDataset):
                     coords = np.array(sub.exterior.coords, dtype=np.int32)
                     cv2.fillPoly(out, [coords], color=value)
 
-    def annotations_for_path(self, image_path, return_tensor=False) -> dict:
+    def targets_for_path(self, image_path, return_tensor=False) -> dict:
         """Construct target dictionary for a given image path.
 
         Args:
@@ -691,7 +723,7 @@ class PolygonDataset(TrainingDataset):
         Returns:
             target dictionary with boxes, labels and geometry entries
         """
-        image_annotations = self.annotations[self.annotations.image_path == image_path]
+        image_annotations = self.annotations_for_path(image_path)
         targets = {}
 
         # Polygon bounds give the enclosing box used by Mask R-CNN.
@@ -723,7 +755,7 @@ class PolygonDataset(TrainingDataset):
             image = self.load_image(idx)
 
         height, width = image.shape[:2]
-        targets = self.annotations_for_path(self.image_names[idx])
+        targets = self.targets_for_path(self.image_names[idx])
 
         boxes = targets["boxes"]
         labels = targets["labels"]

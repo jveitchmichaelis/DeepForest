@@ -39,6 +39,7 @@ train:
     lr: 0.001   # base LR at batch_size 8
     # Enable if issues arise, but the dataset should not error.
     validate_coordinates: False
+    preload_annotations: True
     optimizer:
         type: SGD
         weight_decay: 0.0001
@@ -71,6 +72,7 @@ validation:
     val_accuracy_interval: 5
     # Enable if issues arise, but the dataset should not error.
     validate_coordinates: False
+    preload_annotations: True
     # Fast train-time evaluation:
     augmentations:
         - CenterCrop: {size: [1024, 1024], p: 1.0}

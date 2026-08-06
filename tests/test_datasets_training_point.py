@@ -93,7 +93,7 @@ def test_point_dataset_from_boxes(box_csv, box_root_dir):
     assert points.shape == (raw.shape[0], 2)
 
     # Verify raw annotations without augmentation
-    targets = ds.annotations_for_path(ds.image_names[0])
+    targets = ds.targets_for_path(ds.image_names[0])
     for i, (_, row) in enumerate(raw.iterrows()):
         expected_cx = (row["xmin"] + row["xmax"]) / 2
         expected_cy = (row["ymin"] + row["ymax"]) / 2

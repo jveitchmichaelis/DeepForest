@@ -353,7 +353,7 @@ class ImagesCallback(Callback):
                 targets = utilities.format_geometry(target_dict, scores=False)
             else:
                 targets = utilities.format_geometry(
-                    dataset.annotations_for_path(image_name, return_tensor=True),
+                    dataset.targets_for_path(image_name, return_tensor=True),
                     scores=False,
                 )
 

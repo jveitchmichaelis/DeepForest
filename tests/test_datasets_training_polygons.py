@@ -20,6 +20,25 @@ def polygon_root_dir():
     return os.path.dirname(get_data("coco_sample_file.json"))
 
 
+@pytest.mark.parametrize("preload_annotations", [False, True])
+def test_preload_annotations_matches_scan(
+    polygon_annotation_file, polygon_root_dir, preload_annotations
+):
+    """Preloading groups annotations up front but must select the same rows."""
+    ds = PolygonDataset(
+        csv_file=polygon_annotation_file,
+        root_dir=polygon_root_dir,
+        label_dict={"tree": 0},
+        preload_annotations=preload_annotations,
+    )
+
+    assert (ds.annotation_groups is not None) == preload_annotations
+
+    for image_path in ds.image_names:
+        expected = ds.annotations[ds.annotations.image_path == image_path]
+        assert ds.annotations_for_path(image_path).equals(expected)
+
+
 def test_polygon_dataset_basic(polygon_annotation_file, polygon_root_dir):
     ds = PolygonDataset(
         csv_file=polygon_annotation_file,
@@ -79,7 +98,7 @@ def test_annotations_for_path_tensor(polygon_annotation_file, polygon_root_dir):
     )
 
     image_name = ds.image_names[0]
-    targets = ds.annotations_for_path(image_name, return_tensor=True)
+    targets = ds.targets_for_path(image_name, return_tensor=True)
 
     assert torch.is_tensor(targets["boxes"])
     assert torch.is_tensor(targets["labels"])
