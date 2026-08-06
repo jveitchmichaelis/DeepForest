@@ -67,5 +67,6 @@ validation:
     root_dir: data/tcd/test/images
     # Val step + segm mAP are expensive for this model; run every 5 epochs.
     val_accuracy_interval: 5
-    # Eval at full resolution / 0.1 m/px GSD.
-    augmentations: []
+    # Fast train-time evaluation:
+    augmentations:
+        - CenterCrop: {size: [1024, 1024], p: 1.0}

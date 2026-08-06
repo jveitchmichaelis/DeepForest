@@ -158,6 +158,7 @@ _SUPPORTED_TRANSFORMS = {
     "VerticalFlip": (K.RandomVerticalFlip, {"p": 0.5}),
     "Resize": (K.LongestMaxSize, {"max_size": 400}),
     "RandomCrop": (K.RandomCrop, {"size": (200, 200), "p": 0.5}),
+    "CenterCrop": (K.CenterCrop, {"size": (400, 400), "p": 1.0}),
     "RandomResizedCrop": (
         K.RandomResizedCrop,
         {"size": (400, 400), "scale": (0.5, 1.0), "ratio": (1.0, 1.0), "p": 0.5},
@@ -252,7 +253,7 @@ def get_transform(
             transforms_list.append(aug_transform)
 
     # Enforce ordering to avoid issues with padding and cropping
-    _crop_types = (K.RandomCrop, K.RandomResizedCrop)
+    _crop_types = (K.RandomCrop, K.CenterCrop, K.RandomResizedCrop)
     _pad_types = (K.PadTo, RandomPadTo)
     standard = [t for t in transforms_list if not isinstance(t, _crop_types + _pad_types)]
     crops = [t for t in transforms_list if isinstance(t, _crop_types)]
@@ -341,6 +342,14 @@ def _create_augmentation(
 
     final_params = base_params.copy()
     final_params.update(params)
+
+    # Config files give sequences as lists, but some kornia transforms type
+    # check for a tuple and reject a list (e.g. CenterCrop's size). Kornia
+    # reads both the same way, so convert.
+    final_params = {
+        key: tuple(value) if isinstance(value, list) else value
+        for key, value in final_params.items()
+    }
 
     try:
         return transform(**final_params)

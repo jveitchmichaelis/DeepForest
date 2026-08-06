@@ -5,6 +5,7 @@ import os
 import torch
 import kornia.augmentation as K
 import pytest
+from kornia.constants import DataKey
 
 from deepforest import main, get_data
 from deepforest.augmentations import _create_augmentation
@@ -381,6 +382,56 @@ def test_reordering_produces_correct_output():
     expected_box = torch.tensor([[[59., 69., 89., 94.]]])
     assert torch.allclose(box_wrong, expected_box, atol=1.0)
     assert torch.allclose(box_correct, expected_box, atol=1.0)
+
+
+def test_center_crop_with_panoptic_mask():
+    """CenterCrop takes a native-resolution window and carries masks with it.
+
+    Used for polygon validation, where scoring full tiles is expensive. The
+    panoptic map must keep its uint16 instance ids (no interpolation), boxes
+    must shift into crop coordinates, and instances that fall outside the
+    window must disappear from the map.
+    """
+    data_keys = [DataKey.IMAGE, DataKey.BBOX_XYXY, DataKey.MASK]
+    transform = get_transform(
+        augmentations={"CenterCrop": {"size": (100, 100), "p": 1.0}},
+        data_keys=data_keys,
+    )
+
+    image = torch.rand(1, 3, 200, 200)
+    # Instance 1 sits in the top-left corner and is cropped away entirely;
+    # instance 2 straddles the centre and survives.
+    boxes = torch.tensor([[[10., 10., 30., 30.], [90., 90., 130., 130.]]])
+    panoptic = torch.zeros(1, 1, 200, 200, dtype=torch.uint16)
+    panoptic[0, 0, 10:30, 10:30] = 1
+    panoptic[0, 0, 90:130, 90:130] = 2
+
+    out_image, out_boxes, out_panoptic = transform(image, boxes, panoptic)
+
+    assert out_image.shape == torch.Size([1, 3, 100, 100])
+    assert out_panoptic.shape == torch.Size([1, 1, 100, 100])
+    assert out_panoptic.dtype == torch.uint16
+
+    # Only the surviving instance id is left in the map.
+    ids = torch.unique(out_panoptic.to(torch.int32))
+    assert torch.equal(ids, torch.tensor([0, 2], dtype=torch.int32))
+
+    # Boxes are shifted by the 50px crop origin, not rescaled.
+    expected = torch.tensor([[[-40., -40., -20., -20.], [40., 40., 80., 80.]]])
+    assert torch.allclose(out_boxes, expected, atol=1.0)
+
+
+def test_center_crop_sorts_after_photometric():
+    """CenterCrop is treated as a crop, so it runs after standard transforms."""
+    transform = get_transform(
+        augmentations=[
+            {"CenterCrop": {"size": (100, 100), "p": 1.0}},
+            {"HorizontalFlip": {"p": 1.0}},
+        ]
+    )
+
+    assert isinstance(transform[0], K.RandomHorizontalFlip)
+    assert isinstance(transform[1], K.CenterCrop)
 
 
 if __name__ == "__main__":

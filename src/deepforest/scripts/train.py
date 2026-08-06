@@ -15,7 +15,7 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
 
 from deepforest import distributed
-from deepforest.callbacks import ImagesCallback
+from deepforest.callbacks import ImagesCallback, MemoryMonitorCallback
 from deepforest.main import deepforest
 
 
@@ -46,8 +46,9 @@ def train(
             Defaults to False.
         tensorboard (bool, optional): Whether to enable TensorBoard logging in addition
             to CSV logging. Defaults to False.
-        trace (bool, optional): Whether to enable PyTorch memory profiling for debugging.
-            Only works when CUDA is available. Defaults to False.
+        trace (bool, optional): Whether to enable memory debugging. Always logs
+            per-batch process, worker and CUDA memory via MemoryMonitorCallback;
+            the CUDA allocator snapshot additionally needs CUDA. Defaults to False.
         resume (str | None, optional): Path to checkpoint to resume training from.
             Defaults to None.
         experiment_name (str | None, optional): Custom experiment name for loggers.
@@ -134,6 +135,11 @@ def train(
 
     # The rich progress bar redraws too often to be readable in SLURM logs.
     callbacks.append(TQDMProgressBar(refresh_rate=50))
+
+    if trace:
+        # Process and worker RSS alongside the CUDA snapshot, so an OOM can be
+        # attributed to the dataloader rather than the model.
+        callbacks.append(MemoryMonitorCallback())
 
     # Setup checkpoint to store in log directory
     if checkpoint:
