@@ -138,8 +138,8 @@ class _NativeResolutionTransform(GeneralizedRCNNTransform):
     would upscale 640 crops to 800 at training (wasted compute) and
     downscale large patches at inference (destructive resolution loss).
     Disabling resize matches Detectron2's ``MIN_SIZE_TEST=0`` and lets
-    the augmentation pipeline own all scale selection upstream. Normalize
-    and pad-to-size-divisible still run as usual.
+    the augmentation pipeline own all scale selection upstream.
+    Normalize and pad-to-size-divisible still run as usual.
     """
 
     def resize(self, image, target=None):
@@ -151,8 +151,9 @@ def _decode_panoptic_target(
 ) -> torch.Tensor:
     """Decode a panoptic-encoded target into per-instance binary masks.
 
-    Returns a ``(N, H, W)`` tensor on the same device as ``panoptic_masks``.
-    ``N`` is the number of surviving instance IDs in ``unique_ids``.
+    Returns a ``(N, H, W)`` tensor on the same device as
+    ``panoptic_masks``. ``N`` is the number of surviving instance IDs in
+    ``unique_ids``.
     """
     panoptic = target["panoptic_masks"]
     ids = target["unique_ids"]
@@ -166,8 +167,8 @@ def _masks_to_polygons(masks: np.ndarray) -> list[shapely.geometry.Polygon]:
     """Vectorise a stack of binary masks via the largest external contour.
 
     Mirrors ``utilities.mask_to_polygon`` but operates on a stack; kept
-    in the model module so ``MaskRCNN.forward`` doesn't pull in a
-    cycle-prone import from ``utilities``.
+    in the model module so ``MaskRCNN.forward`` doesn't pull in a cycle-
+    prone import from ``utilities``.
     """
     polygons: list[shapely.geometry.Polygon] = []
     for mask in masks:
@@ -204,7 +205,8 @@ def set_loss_class_weights(weights: list[float] | torch.Tensor | None) -> None:
 
 
 def clear_loss_class_weights() -> None:
-    """Disable Fast R-CNN classifier CE weighting (restores torchvision default)."""
+    """Disable Fast R-CNN classifier CE weighting (restores torchvision
+    default)."""
     set_loss_class_weights(None)
 
 

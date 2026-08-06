@@ -1030,9 +1030,10 @@ class deepforest(pl.LightningModule):
     def _format_map_output(self, output: dict) -> dict:
         """Make a MeanAveragePrecision result loggable.
 
-        Drops the non-scalar ``classes`` entry and, when ``class_metrics`` is on
-        (multi-class), expands each ``*_per_class`` tensor into one scalar per
-        label, keyed by class name (e.g. ``map_per_class`` -> ``map_tree``).
+        Drops the non-scalar ``classes`` entry and, when
+        ``class_metrics`` is on (multi-class), expands each
+        ``*_per_class`` tensor into one scalar per label, keyed by class
+        name (e.g. ``map_per_class`` -> ``map_tree``).
         """
         classes = output.pop("classes", None)
         formatted = {}
@@ -1206,9 +1207,9 @@ class deepforest(pl.LightningModule):
     def _build_param_groups(self, weight_decay: float):
         """Split parameters so norm-layer affine params skip weight decay.
 
-        Matches Detectron2's ``WEIGHT_DECAY_NORM=0.0`` recipe: BatchNorm /
-        GroupNorm / LayerNorm scale and shift parameters are placed in a
-        zero-decay group; everything else (including biases, conv and
+        Matches Detectron2's ``WEIGHT_DECAY_NORM=0.0`` recipe: BatchNorm
+        / GroupNorm / LayerNorm scale and shift parameters are placed in
+        a zero-decay group; everything else (including biases, conv and
         linear weights) uses the standard decay.
 
         Falls back to ``self.model.parameters()`` when no norm-layer

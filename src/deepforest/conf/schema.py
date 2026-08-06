@@ -184,8 +184,8 @@ class MaskRCNNConfig:
     masks) and is what the validation mAP metric expects. ``polygons``
     vectorises masks immediately after the forward (via
     ``cv2.findContours``) and drops the dense tensor — useful for
-    ``predict_image`` / ``predict_tile`` where the raw mask tensor
-    can dominate output memory.
+    ``predict_image`` / ``predict_tile`` where the raw mask tensor can
+    dominate output memory.
     """
 
     trainable_backbone_layers: int | None = None
