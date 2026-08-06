@@ -1,0 +1,71 @@
+# OAM-TCD (restor/tcd) dataset config for Mask R-CNN.
+
+defaults:
+    - polygon
+    - _self_
+
+batch_size: 8
+workers: 8
+
+log_root: ./logs/maskrcnn
+
+label_dict:
+    tree: 0
+    canopy: 1
+num_classes: 2
+
+score_thresh: 0.2
+# Test-time NMS IoU threshold (the polygon default is 0.3).
+nms_thresh: 0.5
+detections_per_img: 256
+
+maskrcnn:
+    trainable_backbone_layers: 3
+    # POST_NMS_TOPK_TRAIN below the torchvision default of 2000;
+    # PRE_NMS_TOPK_TRAIN is left at the torchvision default.
+    rpn_post_nms_top_n_train: 1000
+    rpn_pre_nms_top_n_test: 512
+    rpn_post_nms_top_n_test: 512
+    # Steady-state CUDA peak is ~17 GB on a 192 GB B200; recomputing
+    # activations in the backward pass isn't necessary here.
+    gradient_checkpointing: false
+
+gradient_clip_val: null
+precision: 16-mixed
+
+train:
+    csv_file: data/tcd/train.json
+    root_dir: data/tcd/train/images
+    lr: 0.001   # base LR at batch_size 8
+    optimizer:
+        type: SGD
+        weight_decay: 0.0001
+        momentum: 0.9
+    scheduler:
+        type: multistepLR
+        params:
+            # LR drops at 50%/80%/90% of training.
+            milestones: [50, 80, 90]
+            gamma: 0.1
+            # ~1 epoch of warmup at batch_size 8.
+            warmup_epochs: 1
+            warmup_start_factor: 0.001
+    class_balanced_sampler: false
+    class_balanced_loss: false
+    epochs: 100
+    augmentations:
+        # Native-resolution 1024 crop so GSD
+        # stays 0.1 m/px
+        - HorizontalFlip: {p: 0.5}
+        - VerticalFlip: {p: 0.5}
+        - RandomBrightnessContrast: {brightness: 0.25, contrast: 0.25, saturation: 0.25, hue: 0.0, p: 1.0}
+        - Rotate: {degrees: [0, 90], p: 0.5}
+        - RandomCrop: {size: [1024, 1024], p: 1.0}
+
+validation:
+    csv_file: data/tcd/test.json
+    root_dir: data/tcd/test/images
+    # Val step + segm mAP are expensive for this model; run every 5 epochs.
+    val_accuracy_interval: 5
+    # Eval at full resolution / 0.1 m/px GSD.
+    augmentations: []
