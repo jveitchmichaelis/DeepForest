@@ -7,7 +7,11 @@ from pathlib import Path
 
 import torch
 from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning.callbacks import DeviceStatsMonitor, ModelCheckpoint
+from pytorch_lightning.callbacks import (
+    DeviceStatsMonitor,
+    ModelCheckpoint,
+    TQDMProgressBar,
+)
 from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
 
 from deepforest import distributed
@@ -128,6 +132,9 @@ def train(
         )
     )
 
+    # The rich progress bar redraws too often to be readable in SLURM logs.
+    callbacks.append(TQDMProgressBar(refresh_rate=50))
+
     # Setup checkpoint to store in log directory
     if checkpoint:
         checkpoint_callback = ModelCheckpoint(
@@ -145,7 +152,7 @@ def train(
     trainer_kwargs = {
         "logger": loggers,
         "callbacks": callbacks,
-        "gradient_clip_val": 0.5,
+        "gradient_clip_val": config.gradient_clip_val,
     }
     if strategy is not None:
         trainer_kwargs["strategy"] = strategy
