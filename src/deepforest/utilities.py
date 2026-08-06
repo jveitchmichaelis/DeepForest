@@ -363,8 +363,9 @@ def determine_geometry_type(df):
 
     elif isinstance(df, dict):
         # masks/polygons take precedence: instance-segmentation predictions
-        # carry a mask alongside "boxes".
-        if {"masks", "polygons", "polygon"} & df.keys():
+        # carry a mask alongside "boxes". Training and validation targets
+        # from PolygonDataset carry the panoptic-encoded form instead.
+        if {"masks", "polygons", "polygon", "panoptic_masks"} & df.keys():
             geometry_type = "polygon"
         elif "boxes" in df.keys():
             geometry_type = "box"
@@ -469,13 +470,15 @@ def mask_to_polygon(mask: np.ndarray) -> shapely.geometry.Polygon:
 def format_polygons(prediction: dict, scores: bool = True) -> pd.DataFrame | None:
     """Format an instance-segmentation prediction into a dataframe.
 
-    Converts each predicted mask into a Shapely polygon. Works for both
-    model predictions (float masks of shape ``(N, 1, H, W)`` with scores)
-    and training targets (uint8 masks of shape ``(N, H, W)`` without scores).
+    Converts each predicted mask into a Shapely polygon. Works for
+    model predictions (float masks of shape ``(N, 1, H, W)`` with scores),
+    training targets (uint8 masks of shape ``(N, H, W)`` without scores),
+    and the panoptic-encoded targets produced by PolygonDataset.
 
     Args:
-        prediction: dict with ``"masks"`` and ``"labels"`` (and ``"scores"``
-            when ``scores`` is True).
+        prediction: dict with ``"labels"`` plus one of ``"polygons"``,
+            ``"panoptic_masks"`` or ``"masks"`` (and ``"scores"`` when
+            ``scores`` is True).
         scores: Whether the prediction includes a score per instance.
 
     Returns:
@@ -488,6 +491,15 @@ def format_polygons(prediction: dict, scores: bool = True) -> pd.DataFrame | Non
         geometries = list(prediction["polygons"])
         if len(geometries) == 0:
             return None
+    elif "panoptic_masks" in prediction:
+        # PolygonDataset stores all instances of an image in a single
+        # (H, W) map of instance ids. Rasterise one id at a time so the
+        # dense (N, H, W) stack is never materialized.
+        panoptic = prediction["panoptic_masks"].cpu().detach().numpy()
+        ids = prediction["unique_ids"].cpu().detach().numpy()
+        if ids.size == 0:
+            return None
+        geometries = [mask_to_polygon((panoptic == i).astype(np.uint8)) for i in ids]
     else:
         masks = prediction["masks"]
         if len(masks) == 0:
