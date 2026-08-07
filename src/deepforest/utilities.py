@@ -113,7 +113,11 @@ class DownloadProgressBar(tqdm):
 class DeepForest_DataFrame(gpd.GeoDataFrame):
     """Custom GeoDataFrame that preserves a root_dir attribute if present."""
 
-    _metadata = ["root_dir"]
+    # Extend, don't replace: GeoDataFrame._metadata carries
+    # _geometry_column_name, which is how the active geometry column
+    # survives pickling and __finalize__. Overwriting the list drops it,
+    # so any frame sent to a dataloader worker loses .geometry.
+    _metadata = [*gpd.GeoDataFrame._metadata, "root_dir"]
 
     def __init__(self, *args, **kwargs):
         root_dir = getattr(args[0], "root_dir", None) if args else None

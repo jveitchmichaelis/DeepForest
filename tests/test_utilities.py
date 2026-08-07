@@ -1,6 +1,7 @@
 # test_utilities
 import json
 import os
+import pickle
 
 import geopandas as gpd
 import numpy as np
@@ -55,6 +56,26 @@ def test_read_file(tmp_path):
     assert "image_path" in shp.columns
     assert "label" in shp.columns
     assert hasattr(shp, "root_dir")
+
+
+def test_read_file_survives_pickle(tmp_path):
+    """Dataloader workers are spawned on macOS, so annotations are pickled to
+    reach them. Both the active geometry column and root_dir must survive, or
+    the worker raises on .geometry access."""
+    sample_geometry = [geometry.Point(404211.9 + 10, 3285102 + 20), geometry.Point(404211.9 + 20, 3285102 + 20)]
+    df = pd.DataFrame({"geometry": sample_geometry, "label": ["Tree", "Tree"]})
+    gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:32617")
+    gdf["image_path"] = os.path.basename(get_data("OSBS_029.tif"))
+    gdf.to_file(tmp_path / "annotations.shp")
+    shp = utilities.read_file(input=str(tmp_path / "annotations.shp"), root_dir=os.path.dirname(get_data("OSBS_029.tif")))
+
+    restored = pickle.loads(pickle.dumps(shp))
+    assert restored.geometry.iloc[0].geom_type == "Point"
+    assert restored.root_dir == shp.root_dir
+
+    # groupby is how PolygonDataset preloads annotations per image
+    group = dict(tuple(shp.groupby("image_path")))[shp.image_path.iloc[0]]
+    assert pickle.loads(pickle.dumps(group)).geometry.iloc[0].geom_type == "Point"
 
 
 def test_read_file_multiple_images(tmp_path):
