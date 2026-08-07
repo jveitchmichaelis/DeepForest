@@ -63,7 +63,10 @@ def test_create_model(config, num_classes):
     detr_model = DeformableDetr.Model(config).create_model()
     detr_model.eval()
     x = [torch.rand(3, 300, 400), torch.rand(3, 500, 400)]
-    _ = detr_model(x)
+    # The processor upscales these to ~1000x1066, so retaining activations
+    # for a backward we never run costs ~8 GB.
+    with torch.no_grad():
+        _ = detr_model(x)
 
     assert detr_model.label_dict == config.label_dict
 
@@ -79,16 +82,17 @@ def test_boxes_in_output(config):
 
     image_path = get_data("OSBS_029.png")
 
-    # Passing a numpy array (or tensor) should work:
-    result = detr_model(np.array(Image.open(image_path)))
+    with torch.no_grad():
+        # Passing a numpy array (or tensor) should work:
+        result = detr_model(np.array(Image.open(image_path)))
 
-    for r in result:
-        assert "boxes" in r
-        assert "scores" in r
-        assert "labels" in r
+        for r in result:
+            assert "boxes" in r
+            assert "scores" in r
+            assert "labels" in r
 
-    # Passing a list is also allowed:
-    result = detr_model([np.array(Image.open(image_path))])
+        # Passing a list is also allowed:
+        result = detr_model([np.array(Image.open(image_path))])
 
     for r in result:
         assert "boxes" in r

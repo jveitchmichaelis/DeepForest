@@ -119,10 +119,17 @@ def test_polygon_dataset_collate(polygon_annotation_file, polygon_root_dir):
     assert all("panoptic_masks" in t and "unique_ids" in t for t in targets)
 
 
-def test_polygon_oob_coordinates(tmp_path, polygon_root_dir):
-    image_name = "5b90f92da0d7280005fab355_4310.tif"
+def _write_oob_annotation(tmp_path):
+    """COCO file with one polygon whose vertices fall outside the image."""
     data = {
-        "images": [{"id": 1, "file_name": image_name, "width": 2048, "height": 2048}],
+        "images": [
+            {
+                "id": 1,
+                "file_name": "5b90f92da0d7280005fab355_4310.tif",
+                "width": 2048,
+                "height": 2048,
+            }
+        ],
         "annotations": [
             {
                 "id": 1,
@@ -140,6 +147,12 @@ def test_polygon_oob_coordinates(tmp_path, polygon_root_dir):
     json_path = tmp_path / "oob.json"
     with open(json_path, "w") as f:
         json.dump(data, f)
+
+    return json_path
+
+
+def test_polygon_oob_coordinates(tmp_path, polygon_root_dir):
+    json_path = _write_oob_annotation(tmp_path)
 
     with pytest.raises(ValueError):
         PolygonDataset(
@@ -181,26 +194,7 @@ def test_polygon_negative_coordinates(tmp_path, polygon_root_dir):
 
 def test_polygon_dataset_validate_coordinates_disabled(tmp_path, polygon_root_dir):
     """Setting validate_coordinates=False should skip coordinate checks."""
-    image_name = "5b90f92da0d7280005fab355_4310.tif"
-    data = {
-        "images": [{"id": 1, "file_name": image_name, "width": 2048, "height": 2048}],
-        "annotations": [
-            {
-                "id": 1,
-                "image_id": 1,
-                "category_id": 1,
-                "segmentation": [[2049, 10, 2500, 10, 2048.1, 50, 200, 50]],
-                "bbox": [200, 10, 50, 40],
-                "area": 2000,
-                "iscrowd": 0,
-            }
-        ],
-        "categories": [{"id": 1, "name": "tree"}],
-    }
-
-    json_path = tmp_path / "oob.json"
-    with open(json_path, "w") as f:
-        json.dump(data, f)
+    json_path = _write_oob_annotation(tmp_path)
 
     with pytest.raises(ValueError):
         PolygonDataset(

@@ -56,7 +56,12 @@ class BaseModel:
         # Create a dummy batch of 3 band data.
         x = [torch.rand(3, 300, 400), torch.rand(3, 500, 400)]
 
-        predictions = test_model(x)
+        # Only the output structure is checked, so retaining activations for
+        # a backward pass is pure waste. It costs 8 GB on Deformable DETR,
+        # whose processor upscales these dummy images to ~1000x1066.
+        with torch.no_grad():
+            predictions = test_model(x)
+
         # Model takes in a batch of images
         assert len(predictions) == 2
 
