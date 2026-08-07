@@ -484,27 +484,6 @@ class deepforest(pl.LightningModule):
         if self.existing_train_dataloader:
             return self.existing_train_dataloader
 
-        sampler = None
-        balance_sampler = self.config.train.class_balanced_sampler
-        balance_loss = self.config.train.class_balanced_loss
-
-        if balance_sampler or balance_loss:
-            from deepforest.datasets.sampling import build_class_balanced_sampler
-
-            ann = utilities.read_file(
-                self.config.train.csv_file, root_dir=self.config.train.root_dir
-            )
-            if balance_sampler:
-                sampler = build_class_balanced_sampler(ann)
-            if balance_loss:
-                if hasattr(self.model, "apply_class_balanced_loss"):
-                    self.model.apply_class_balanced_loss(ann, self.label_dict)
-                else:
-                    warnings.warn(
-                        f"class_balanced_loss is not supported by {type(self.model).__name__}; ignoring.",
-                        stacklevel=2,
-                    )
-
         loader = self.load_dataset(
             csv_file=self.config.train.csv_file,
             root_dir=self.config.train.root_dir,
@@ -515,7 +494,6 @@ class deepforest(pl.LightningModule):
             shuffle=True,
             transforms=self.transforms,
             batch_size=self.config.batch_size,
-            sampler=sampler,
         )
 
         return loader
@@ -1008,15 +986,9 @@ class deepforest(pl.LightningModule):
                 # — bounded by ``detections_per_img`` so the (N, H, W)
                 # tensor is small enough for the mAP comparison.
                 if "panoptic_masks" in target:
-                    panoptic = target["panoptic_masks"]
-                    ids = target["unique_ids"]
-                    if ids.numel() == 0:
-                        height, width = panoptic.shape
-                        target_masks = torch.zeros(
-                            (0, height, width), dtype=torch.bool, device=panoptic.device
-                        )
-                    else:
-                        target_masks = panoptic.unsqueeze(0) == ids.view(-1, 1, 1)
+                    target_masks = utilities.decode_panoptic_target(
+                        target, dtype=torch.bool
+                    )
                 else:
                     target_masks = target["masks"].to(torch.bool)
 
@@ -1236,45 +1208,10 @@ class deepforest(pl.LightningModule):
 
         return results
 
-    def _build_param_groups(self, weight_decay: float):
-        """Split parameters so norm-layer affine params skip weight decay.
-
-        Matches Detectron2's ``WEIGHT_DECAY_NORM=0.0`` recipe: BatchNorm
-        / GroupNorm / LayerNorm scale and shift parameters are placed in
-        a zero-decay group; everything else (including biases, conv and
-        linear weights) uses the standard decay.
-
-        Falls back to ``self.model.parameters()`` when no norm-layer
-        parameters are found, preserving current behaviour for
-        architectures without learnable BN/GN/LN.
-        """
-        norm_types = (
-            torch.nn.BatchNorm1d,
-            torch.nn.BatchNorm2d,
-            torch.nn.BatchNorm3d,
-            torch.nn.GroupNorm,
-            torch.nn.LayerNorm,
-        )
-        decay, no_decay = [], []
-        for module in self.model.modules():
-            for _name, p in module.named_parameters(recurse=False):
-                if not p.requires_grad:
-                    continue
-                if isinstance(module, norm_types):
-                    no_decay.append(p)
-                else:
-                    decay.append(p)
-        if not no_decay:
-            return self.model.parameters()
-        return [
-            {"params": decay, "weight_decay": weight_decay},
-            {"params": no_decay, "weight_decay": 0.0},
-        ]
-
     def configure_optimizers(self):
         opt_cfg = self.config.train.optimizer
         lr = self.config.train.lr
-        param_groups = self._build_param_groups(opt_cfg.weight_decay)
+        param_groups = self.model.parameters()
         if opt_cfg.type == "Adam":
             optimizer = optim.Adam(
                 param_groups,
@@ -1333,40 +1270,9 @@ class deepforest(pl.LightningModule):
             )
 
         elif scheduler_type == "multistepLR":
-            if params.warmup_epochs > 0:
-                # Step-level lambda so warmup ramps smoothly within the
-                # first ``warmup_epochs * steps_per_epoch`` iterations,
-                # matching Detectron2's iter-based ``WarmupMultiStepLR``.
-                # Milestones in the config stay epoch-indexed; convert them.
-                steps_per_epoch = max(
-                    1,
-                    self.trainer.estimated_stepping_batches
-                    // max(1, self.trainer.max_epochs),
-                )
-                warmup_iters = max(1, int(params.warmup_epochs) * steps_per_epoch)
-                step_milestones = [int(m) * steps_per_epoch for m in params.milestones]
-                start_factor = float(params.warmup_start_factor)
-                gamma = float(params.gamma)
-
-                def lr_lambda_warmup_multistep(step):
-                    if step < warmup_iters:
-                        return (
-                            start_factor
-                            + (1.0 - start_factor) * (step + 1) / warmup_iters
-                        )
-                    factor = 1.0
-                    for m in step_milestones:
-                        if step >= m:
-                            factor *= gamma
-                    return factor
-
-                scheduler = torch.optim.lr_scheduler.LambdaLR(
-                    optimizer, lr_lambda=lr_lambda_warmup_multistep
-                )
-            else:
-                scheduler = torch.optim.lr_scheduler.MultiStepLR(
-                    optimizer, milestones=params.milestones, gamma=params.gamma
-                )
+            scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                optimizer, milestones=params.milestones, gamma=params.gamma
+            )
 
         elif scheduler_type == "exponentialLR":
             scheduler = torch.optim.lr_scheduler.ExponentialLR(
@@ -1393,21 +1299,11 @@ class deepforest(pl.LightningModule):
                 "exponentialLR, ReduceLROnPlateau."
             )
 
-        # Per-step interval for the warmup-prefixed multistep scheduler so
-        # the linear ramp is applied iteration-by-iteration rather than
-        # only at epoch boundaries.
-        step_level = scheduler_type == "multistepLR" and params.warmup_epochs > 0
-        lr_sched_cfg = (
-            {"scheduler": scheduler, "interval": "step", "frequency": 1}
-            if step_level
-            else scheduler
-        )
-
         # Monitor learning rate if val data is used
         if self.config.validation.csv_file is not None:
             return {
                 "optimizer": optimizer,
-                "lr_scheduler": lr_sched_cfg,
+                "lr_scheduler": scheduler,
                 "monitor": self.config.validation.lr_plateau_target,
             }
         else:

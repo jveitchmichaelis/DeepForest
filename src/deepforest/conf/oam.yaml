@@ -26,9 +26,6 @@ maskrcnn:
     rpn_post_nms_top_n_train: 1000
     rpn_pre_nms_top_n_test: 512
     rpn_post_nms_top_n_test: 512
-    # Steady-state CUDA peak is ~17 GB on a 192 GB B200; recomputing
-    # activations in the backward pass isn't necessary here.
-    gradient_checkpointing: false
 
 gradient_clip_val: null
 precision: 16-mixed
@@ -50,11 +47,6 @@ train:
             # LR drops at 50%/80%/90% of training.
             milestones: [50, 80, 90]
             gamma: 0.1
-            # ~1 epoch of warmup at batch_size 8.
-            warmup_epochs: 1
-            warmup_start_factor: 0.001
-    class_balanced_sampler: false
-    class_balanced_loss: false
     epochs: 100
     augmentations:
         # Native-resolution 1024 crop so GSD

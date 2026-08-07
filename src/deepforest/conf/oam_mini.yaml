@@ -1,0 +1,43 @@
+# Local smoke/stability config for OAM-TCD Mask R-CNN.
+#
+# Inherits everything from oam.yaml — same 2 classes, augmentations,
+# optimizer, LR and scheduler — and only changes what is needed to run on
+# a laptop: local data paths, CPU, full precision, fewer epochs.
+#
+# Use it to watch the early loss curves (especially train_loss_box_reg)
+# before committing cluster time:
+#   deepforest --config-name oam_mini train
+#
+# The paths are absolute and specific to this machine, same as
+# oam_parity.yaml. Do not ship this file in the PR without making the
+# paths configurable.
+
+defaults:
+    - oam
+    - _self_
+
+# 200 train / 50 test tiles at 2048px, the mini subset of restor/tcd.
+train:
+    csv_file: /Users/josh/data/tcd/train.json
+    root_dir: /Users/josh/data/tcd/train/images
+    # 200 images at batch_size 8 is 25 steps per epoch, so 8 epochs is
+    # the ~200 steps we need to see whether box regression diverges.
+    epochs: 8
+    scheduler:
+        params:
+            # Milestones are epoch-indexed; past the end of this short run
+            # so the LR stays flat and does not mask instability.
+            milestones: [50, 80, 90]
+
+validation:
+    csv_file: /Users/josh/data/tcd/test.json
+    root_dir: /Users/josh/data/tcd/test/images
+    val_accuracy_interval: 2
+
+# MPS Mask R-CNN is broken on the stable torch in .venv, and 16-mixed is
+# not useful on CPU.
+accelerator: cpu
+precision: 32-true
+
+workers: 4
+log_root: ./logs/maskrcnn_mini

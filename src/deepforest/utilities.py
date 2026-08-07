@@ -482,6 +482,45 @@ def mask_to_polygon(mask: np.ndarray) -> shapely.geometry.Polygon:
     return polygon
 
 
+def masks_to_polygons(masks: np.ndarray) -> list[shapely.geometry.Polygon]:
+    """Convert a stack of binary instance masks to Shapely polygons.
+
+    Args:
+        masks: ``(N, H, W)`` array where non-zero pixels mark each instance.
+
+    Returns:
+        One polygon per mask, empty where a mask has no valid contour.
+    """
+    return [mask_to_polygon(mask) for mask in masks]
+
+
+def decode_panoptic_target(
+    target: dict, dtype: "torch.dtype" = torch.uint8
+) -> "torch.Tensor":
+    """Decode a panoptic-encoded target into per-instance binary masks.
+
+    PolygonDataset stores every instance of an image in a single ``(H, W)``
+    map of instance ids rather than an ``(N, H, W)`` stack, which keeps the
+    dense tensor off the dataloader worker boundary. This reverses that
+    encoding, producing exactly the stack the model would otherwise receive.
+
+    Args:
+        target: dict with ``panoptic_masks`` ``(H, W)`` and ``unique_ids``.
+        dtype: Output dtype.
+
+    Returns:
+        ``(N, H, W)`` tensor on the same device as ``panoptic_masks``, where
+        ``N`` is the number of surviving instance ids.
+    """
+    panoptic = target["panoptic_masks"]
+    ids = target["unique_ids"]
+    height, width = panoptic.shape
+    if ids.numel() == 0:
+        return torch.zeros((0, height, width), dtype=dtype, device=panoptic.device)
+
+    return (panoptic.unsqueeze(0) == ids.view(-1, 1, 1)).to(dtype)
+
+
 def _reduce_polygon_to_largest(geom) -> shapely.geometry.Polygon:
     """Reduce a repaired geometry to its largest Polygon component."""
     if geom.is_empty:

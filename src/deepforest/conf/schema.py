@@ -34,10 +34,6 @@ class SchedulerParamsConfig:
     cooldown: int = 0
     min_lr: float = 0.0
     eps: float = 1e-8
-    # Linear LR warmup prefix for multistepLR. Detectron2 uses 1000 iters
-    # (~1 epoch at bs=8 on OAM-TCD). Set to 0 to disable.
-    warmup_epochs: int = 0
-    warmup_start_factor: float = 0.001
 
 
 @dataclass
@@ -88,8 +84,6 @@ class TrainConfig:
     preload_annotations: bool = False
     validate_coordinates: bool = True
     augmentations: list[str] | None = field(default_factory=lambda: ["HorizontalFlip"])
-    class_balanced_loss: bool = False
-    class_balanced_sampler: bool = False
 
 
 @dataclass
@@ -174,33 +168,38 @@ class PointConfig:
 class MaskRCNNConfig:
     """Mask R-CNN specific knobs not shared with other architectures.
 
+    Every field below except ``inference_output`` maps one-to-one onto an
+    argument of ``torchvision.models.detection.mask_rcnn.MaskRCNN`` and
+    keeps torchvision's own default, so setting none of them reproduces
+    stock torchvision behaviour. They are forwarded verbatim, so adding
+    another torchvision argument here needs no change to the model code.
+
     ``trainable_backbone_layers`` follows the torchvision convention: 0
     freezes the whole backbone, 5 trains all of it. ``=3`` is the
     closest analog to Detectron2's ``FREEZE_AT: 2`` used in the OAM-TCD
     paper (freezes stem + layer1).
 
-    ``gradient_checkpointing`` wraps the ResNet body's layer2-4 in
-    activation checkpointing — halves forward activation memory in
-    exchange for ~20-30% slower backward. Headroom for larger batches.
-
     ``inference_output`` picks the eval-mode output format. ``dense``
     preserves the torchvision default (per-instance ``(N, 1, H, W)``
     masks) and is what the validation mAP metric expects. ``polygons``
-    vectorises masks immediately after the forward (via
-    ``cv2.findContours``) and drops the dense tensor — useful for
-    ``predict_image`` / ``predict_tile`` where the raw mask tensor can
-    dominate output memory.
+    vectorises masks immediately after the forward and drops the dense
+    tensor — useful for ``predict_image`` / ``predict_tile`` where the raw
+    mask tensor can dominate output memory.
+
+    Note that ``min_size`` / ``max_size`` are deliberately not exposed:
+    the model disables resizing so the augmentation pipeline controls
+    ground sample distance, which makes both arguments inert.
     """
 
     trainable_backbone_layers: int | None = None
-    # Detectron2 uses pre_train=2000, post_train=1000; torchvision defaults
-    # to 2000 for both. Surface them so OAM-TCD can override post_train=1000
-    # to match the paper's ROI candidate distribution.
+
+    # Proposal counts. Detectron2 uses pre_train=2000, post_train=1000;
+    # torchvision defaults to 2000 for both.
     rpn_pre_nms_top_n_train: int = 2000
     rpn_post_nms_top_n_train: int = 2000
     rpn_pre_nms_top_n_test: int = 1000
     rpn_post_nms_top_n_test: int = 1000
-    gradient_checkpointing: bool = False
+
     inference_output: str = "dense"  # one of: "dense", "polygons"
 
 
