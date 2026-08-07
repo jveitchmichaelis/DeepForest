@@ -1,6 +1,14 @@
 # Fixtures model to only download model once
 # download latest release
 import os
+
+# Several architectures use ops MPS does not implement, notably
+# DeformableDetr's grid_sampler_2d_backward. Falling back to CPU for just
+# those ops lets the suite run on Apple silicon instead of erroring out.
+# This only works because it runs before torch is imported — see the
+# filterwarnings note in pyproject.toml, which used to import torch first.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 import urllib
 
 import pytest

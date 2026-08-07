@@ -152,7 +152,13 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short --cov=src/deepforest --cov-report=term-missing --cov-report=xml"
 filterwarnings = [
-    "ignore::pytorch_lightning.utilities.warnings.PossibleUserWarning"
+    # Matched by module rather than by class on purpose. Naming the class
+    # (pytorch_lightning.utilities.warnings.PossibleUserWarning) makes pytest
+    # import lightning, and therefore torch, while parsing this file — before
+    # any conftest runs. That defeats conftest.py's PYTORCH_ENABLE_MPS_FALLBACK,
+    # which has to be set before torch loads. PossibleUserWarning subclasses
+    # UserWarning, so this still covers it.
+    "ignore::UserWarning:pytorch_lightning.*"
 ]
 markers = [
     "slow: marks tests that are slow to run",
