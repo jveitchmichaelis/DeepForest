@@ -6,6 +6,7 @@ import pickle
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pycocotools.mask as mask_util
 import pytest
 import rasterio as rio
 import shapely
@@ -929,6 +930,76 @@ def test_mask_to_polygon_keeps_holes():
     # Filling the hole would add ~400 px to the area.
     assert polygon.area < mask.sum() + 400
     assert not polygon.contains(shapely.geometry.Point(50, 50))
+
+
+def _two_blob_mask():
+    """Mask with a large blob and a smaller disconnected one."""
+    mask = np.zeros((100, 100), dtype=np.uint8)
+    mask[10:40, 10:40] = 1
+    mask[60:75, 60:75] = 1
+    return mask
+
+
+def test_mask_to_polygon_drops_small_parts_by_default():
+    """Predicted masks keep only the largest blob, so speckle is discarded."""
+    polygon = utilities.mask_to_polygon(_two_blob_mask())
+
+    assert polygon.geom_type == "Polygon"
+    assert not polygon.intersects(shapely.geometry.Point(67, 67))
+
+
+def test_mask_to_polygon_keep_all_parts_returns_multipolygon():
+    """Ground truth keeps every blob rather than truncating to the largest."""
+    polygon = utilities.mask_to_polygon(_two_blob_mask(), keep_all_parts=True)
+
+    assert polygon.geom_type == "MultiPolygon"
+    assert len(polygon.geoms) == 2
+    assert polygon.is_valid
+    assert polygon.intersects(shapely.geometry.Point(67, 67))
+
+
+def test_mask_to_polygon_keep_all_parts_single_blob_stays_polygon():
+    """One component still returns a plain Polygon, not a MultiPolygon."""
+    mask = np.zeros((50, 50), dtype=np.uint8)
+    mask[10:30, 10:30] = 1
+
+    polygon = utilities.mask_to_polygon(mask, keep_all_parts=True)
+
+    assert polygon.geom_type == "Polygon"
+    assert polygon.is_valid
+
+
+def test_read_file_coco_rle_keeps_all_parts(tmpdir):
+    """A multi-part RLE annotation survives ingestion intact."""
+    mask = np.asfortranarray(_two_blob_mask())
+    rle = mask_util.encode(mask)
+    rle["counts"] = rle["counts"].decode("utf-8")
+
+    coco = {
+        "images": [{"id": 1, "file_name": "OSBS_029.tif", "height": 100, "width": 100}],
+        "categories": [{"id": 1, "name": "Tree"}],
+        "annotations": [
+            {
+                "id": 1,
+                "image_id": 1,
+                "category_id": 1,
+                "segmentation": rle,
+                "bbox": [10, 10, 65, 65],
+                "area": float(mask.sum()),
+                "iscrowd": 0,
+            }
+        ],
+    }
+    path = os.path.join(tmpdir, "rle.json")
+    with open(path, "w") as handle:
+        json.dump(coco, handle)
+
+    df = utilities.read_file(path)
+
+    assert len(df) == 1
+    geom = df.geometry.iloc[0]
+    assert geom.geom_type == "MultiPolygon"
+    assert len(geom.geoms) == 2
 
 
 def test_format_polygons_targets_without_scores():

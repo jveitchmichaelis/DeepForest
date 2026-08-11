@@ -437,19 +437,34 @@ def format_boxes(prediction, scores=True):
     return df
 
 
-def mask_to_polygon(mask: np.ndarray) -> shapely.geometry.Polygon:
+def mask_to_polygon(
+    mask: np.ndarray, keep_all_parts: bool = False
+) -> shapely.geometry.Polygon | shapely.geometry.MultiPolygon:
     """Convert a single binary instance mask to a Shapely polygon.
 
-    The largest outer contour is used, along with any holes inside it. Masks
-    that do not contain a valid contour (fewer than three vertices)
+    By default only the largest outer contour is used, along with any holes
+    inside it. This suits predicted masks, where thresholding leaves small
+    disconnected speckle that should not count as part of the instance.
+
+    Ground truth must not be truncated that way, so ``keep_all_parts`` keeps
+    every outer contour and returns a MultiPolygon when a mask has more than
+    one. COCO RLE annotations are the case that needs this: the polygon
+    format stores each part as its own ring, but RLE is a single raster, so
+    dropping all but the largest blob silently deletes annotated area.
+
+    Masks that do not contain a valid contour (fewer than three vertices)
     return an empty polygon. Self intersecting polygons are repaired with
     a zero-width buffer, which preserves concavity.
 
     Args:
         mask: 2D array where non-zero pixels mark the instance.
+        keep_all_parts: Keep every disconnected component instead of only
+            the largest.
 
     Returns:
-        A Shapely Polygon of the instance boundary, or an empty Polygon.
+        A Shapely Polygon of the instance boundary, a MultiPolygon when
+        ``keep_all_parts`` is set and the mask has several components, or an
+        empty Polygon.
     """
     mask = (mask > 0).astype(np.uint8)
     # RETR_CCOMP returns a two level hierarchy: outer contours, then the
@@ -464,22 +479,36 @@ def mask_to_polygon(mask: np.ndarray) -> shapely.geometry.Polygon:
     if not outer:
         return shapely.geometry.Polygon()
 
-    largest = max(outer, key=lambda i: cv2.contourArea(contours[i]))
-    shell = contours[largest].reshape(-1, 2)
-    if shell.shape[0] < 3:
+    if not keep_all_parts:
+        outer = [max(outer, key=lambda i: cv2.contourArea(contours[i]))]
+
+    parts = []
+    for index in outer:
+        shell = contours[index].reshape(-1, 2)
+        if shell.shape[0] < 3:
+            continue
+
+        holes = [
+            contours[i].reshape(-1, 2)
+            for i, node in enumerate(hierarchy[0])
+            if node[3] == index and len(contours[i]) >= 3
+        ]
+
+        part = shapely.geometry.Polygon(shell, holes)
+        if not part.is_valid:
+            part = part.buffer(0)
+            if not keep_all_parts:
+                part = _reduce_polygon_to_largest(part)
+
+        if not part.is_empty:
+            parts.append(part)
+
+    if not parts:
         return shapely.geometry.Polygon()
+    if len(parts) == 1:
+        return parts[0]
 
-    holes = [
-        contours[i].reshape(-1, 2)
-        for i, node in enumerate(hierarchy[0])
-        if node[3] == largest and len(contours[i]) >= 3
-    ]
-
-    polygon = shapely.geometry.Polygon(shell, holes)
-    if not polygon.is_valid:
-        polygon = _reduce_polygon_to_largest(polygon.buffer(0))
-
-    return polygon
+    return shapely.ops.unary_union(parts)
 
 
 def masks_to_polygons(masks: np.ndarray) -> list[shapely.geometry.Polygon]:
@@ -664,7 +693,7 @@ def read_coco(json_file):
             if isinstance(rle.get("counts"), list):
                 rle = mask_util.frPyObjects(rle, rle["size"][0], rle["size"][1])
             mask = mask_util.decode(rle).astype(np.uint8)
-            merged_poly = mask_to_polygon(mask)
+            merged_poly = mask_to_polygon(mask, keep_all_parts=True)
         else:
             poly_list = []
 
