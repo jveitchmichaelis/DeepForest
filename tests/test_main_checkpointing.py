@@ -8,13 +8,16 @@ import torch
 
 from deepforest import get_data, main, utilities
 
+DINOV3_REPO = "facebook/dinov3-vits16-pretrain-lvd1689m"
+
 
 @pytest.fixture
 def config(architecture, tmp_path_factory):
     # Basic from-scratch config for fast tests
     config = {
         "architecture": architecture,
-        "model": {"name": None},
+        # retinanet_dinov3 needs an encoder to build a new model
+        "model": {"name": DINOV3_REPO if architecture == "retinanet_dinov3" else None},
         "num_classes": 1,
         "label_dict": {"Tree": 0},
         "train": {
@@ -49,7 +52,7 @@ def state_dicts_equal(model_a, model_b):
     return True
 
 
-@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr"])
+@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr", "retinanet_dinov3"])
 def test_train_reload_checkpoint(config):
     """Test train and reload checkpoint"""
 
@@ -67,7 +70,7 @@ def test_train_reload_checkpoint(config):
     os.remove(checkpoint_path)
 
 
-@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr"])
+@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr", "retinanet_dinov3"])
 def test_train_and_resume(config):
     """Test resume training from checkpoint with modified config (typically for continuing training)"""
 
@@ -89,7 +92,7 @@ def test_train_and_resume(config):
     assert loaded.trainer.current_epoch == 3
     os.remove(checkpoint_path)
 
-@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr"])
+@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr", "retinanet_dinov3"])
 def test_train_fit_ckpt(config):
     """Test resume directly via fit (typically for interrupted training)"""
 
@@ -109,7 +112,7 @@ def test_train_fit_ckpt(config):
     os.remove(checkpoint_path)
 
 
-@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr"])
+@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr", "retinanet_dinov3"])
 def test_pretrain_finetune(config):
     # Pretrain model
     pretrain = main.deepforest(config=config)
@@ -138,7 +141,7 @@ def test_pretrain_finetune(config):
     os.remove(f"{log_dir}/finetune.ckpt")
 
 
-@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr"])
+@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr", "retinanet_dinov3"])
 def test_local_hf_checkpoint(config):
     """Test loading model.name from local checkpoint path"""
 
@@ -158,10 +161,11 @@ def test_local_hf_checkpoint(config):
 
     assert loaded.config.architecture == config["architecture"]
     assert loaded.config.model.name == pretrain_checkpoint
+    assert state_dicts_equal(pretrain.model, loaded.model)
 
     shutil.rmtree(pretrain_checkpoint)
 
-@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr"])
+@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr", "retinanet_dinov3"])
 def test_checkpoint_label_dict(config, tmp_path, architecture):
     """Test that the label dict is saved and loaded correctly from a checkpoint"""
     # Modify config to use a custom label
@@ -240,7 +244,7 @@ def test_save_and_reload_checkpoint(config):
 
     os.remove(checkpoint_path)
 
-@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr"])
+@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr", "retinanet_dinov3"])
 def test_load_from_checkpoint_with_overrides(config):
     """Test that config_args can override saved config when loading from checkpoint"""
     # Train and save model
@@ -271,7 +275,7 @@ def test_load_from_checkpoint_with_overrides(config):
 
     os.remove(checkpoint_path)
 
-@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr"])
+@pytest.mark.parametrize("architecture", ["retinanet", "DeformableDetr", "retinanet_dinov3"])
 def test_load_from_checkpoint_with_config_dict(config):
     """Test that a full config dict can be passed directly when loading from checkpoint"""
     # Train and save model
@@ -287,7 +291,7 @@ def test_load_from_checkpoint_with_config_dict(config):
             "architecture": config["architecture"],
             "batch_size": 8,
             "train": {"epochs": 20},
-            "model": {"name": None},
+            "model": config["model"],
             "label_dict": config["label_dict"],
             "num_classes": config["num_classes"],
         }

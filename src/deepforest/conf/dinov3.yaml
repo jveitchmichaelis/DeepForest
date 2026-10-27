@@ -1,0 +1,30 @@
+# RetinaNet with a frozen DINOv3 backbone, pretrained on satellite imagery.
+# The facebook/dinov3 repositories are gated: accept the license on
+# Hugging Face and log in before first use.
+defaults:
+  - config
+  - _self_
+
+architecture: 'retinanet_dinov3'
+
+# A DINOv3 encoder creates a new RetinaNet on that encoder. For example,
+# use facebook/dinov3-vitl16-pretrain-lvd1689m for the web image model.
+# A saved DeepForest DINOv3 RetinaNet loads as a trained detector.
+model:
+  name: 'facebook/dinov3-vitl16-pretrain-sat493m'
+  revision: 'main'
+
+# A new model needs labels, override these for your data
+num_classes: 1
+label_dict:
+  Tree: 0
+
+train:
+  freeze_backbone: True
+  epochs: 75
+  lr: 0.01
+  scheduler:
+    type: cosine
+    params:
+      T_max: 75
+      eta_min: 0.0001

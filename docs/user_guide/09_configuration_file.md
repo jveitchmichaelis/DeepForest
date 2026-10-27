@@ -195,6 +195,18 @@ m.config.score_thresh = 0.3
 
 This will be updated when you can predict_tile, predict_image, predict_file, or evaluate
 
+### architecture
+
+The detection model. `retinanet` (default) is a RetinaNet with a ResNet50 backbone. Typically we use models that are initially trained on ImageNet and MS-COCO before fine-tuning on aerial data (for trees or animals). `retinanet_dinov3` is a RetinaNet with a DINOv3 vision transformer backbone. DINOv3 is newer feature extraction model that has been trained on huge quantities of diverse imagery and produces good "generic" features for downstream detection tasks. The authors advise that you do _not_ attempt to fine-tune the backbone weights and instead only train the detection head. We provide an adapter in DeepForest to train a RetinaNet detector with this backbone.
+
+For `retinanet_dinov3`, `model.name` can be a DINOv3 encoder on Hugging Face, which creates a new RetinaNet on that encoder. For example, use `facebook/dinov3-vitl16-pretrain-sat493m` (satellite imagery) or `facebook/dinov3-vitl16-pretrain-lvd1689m` (web images). We have not found significant differences in performance using either model, but you may prefer to use `sat493m` as it has been pretrained on high resolution aerial imagery. After training, save the model and set `model.name` to the saved model to load it again. With `model.name: null`, the satellite model is used.
+
+Note that the `facebook/dinov3` repositories are gated by Meta, so you must accept the license on the model page and log in with `hf auth login` before first use. The `dinov3.yaml` config is a starting point for training:
+
+```bash
+deepforest --config-name dinov3 train train.csv_file=train.csv train.root_dir=images
+```
+
 ## Train
 
 ### csv_file
@@ -276,6 +288,10 @@ A useful pytorch lightning flag that will run a debug run to test inputs. See [p
 For large training runs, the time spent reading each image and passing it to the GPU can be a significant performance bottleneck.
 
 If the training dataset is small enough to fit into GPU memory, pinning the entire dataset to memory before training will increase training speed. Warning, if the pinned memory is too large, the GPU will overflow/core dump and training will crash.
+
+### freeze_backbone
+
+Used by `retinanet_dinov3`. If `True`, the DINOv3 transformer is not updated during training. The feature pyramid layers and the RetinaNet head are still trained.
 
 ## Validation
 

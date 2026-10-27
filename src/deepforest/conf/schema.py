@@ -81,6 +81,7 @@ class TrainConfig:
     epochs: int = 1
     fast_dev_run: bool = False
     preload_images: bool = False
+    freeze_backbone: bool = False
     validate_coordinates: bool = True
     augmentations: list[str] | None = field(default_factory=lambda: ["HorizontalFlip"])
 
