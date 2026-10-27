@@ -92,7 +92,7 @@ class ImagesCallback(Callback):
         out_dir = os.path.join(self.savedir, split + "_sample")
         os.makedirs(out_dir, exist_ok=True)
         n_samples = min(self.dataset_samples, len(dataset))
-        sample_indices = torch.randperm(len(dataset))[:n_samples]
+        sample_indices = torch.randperm(len(dataset))[:n_samples].tolist()
 
         sample_data = [dataset[idx] for idx in sample_indices]
         sample_images = [data[0] for data in sample_data]
@@ -138,10 +138,10 @@ class ImagesCallback(Callback):
         if self.prediction_samples == 0:
             return
 
-        if len(pl_module.predictions) > 0:
-            df = pd.concat(pl_module.predictions)
-        else:
-            df = pd.DataFrame()
+        # Nothing to plot if the model made no predictions
+        if len(pl_module.predictions) == 0:
+            return
+        df = pd.concat(pl_module.predictions)
 
         out_dir = os.path.join(self.savedir, "predictions")
         os.makedirs(out_dir, exist_ok=True)

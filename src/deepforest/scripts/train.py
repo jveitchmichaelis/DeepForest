@@ -25,6 +25,7 @@ def train(
     strategy: str | None = None,
     experiment_name: str | None = None,
     tags: list[str] | None = None,
+    export_hf: bool = False,
 ) -> bool:
     """Train a DeepForest model with configurable logging and experiment
     tracking.
@@ -50,6 +51,9 @@ def train(
             Overrides Comet's auto-generated name if set. Defaults to None.
         tags (list[str] | None, optional): Tags to apply to the Comet experiment.
             Defaults to None.
+        export_hf (bool, optional): After training, save the best checkpoint as a
+            Hugging Face model in <log_dir>/hf_model. Needs checkpoint=True.
+            Defaults to False.
 
     Returns:
         bool: True if training completed successfully, False if training failed
@@ -182,12 +186,30 @@ def train(
     if checkpoint and distributed.is_global_zero(m.trainer):
         for logger in m.trainer.loggers:
             if hasattr(logger.experiment, "log_model"):
-                for checkpoint in glob.glob(
+                for ckpt_file in glob.glob(
                     os.path.join((checkpoint_callback.dirpath), "*.ckpt")
                 ):
-                    m.print(f"Uploading checkpoint {checkpoint}")
+                    m.print(f"Uploading checkpoint {ckpt_file}")
                     logger.experiment.log_model(
-                        name=os.path.basename(checkpoint), file_or_folder=str(checkpoint)
+                        name=os.path.basename(ckpt_file), file_or_folder=str(ckpt_file)
                     )
+
+    if (
+        export_hf
+        and checkpoint
+        and train_success
+        and distributed.is_global_zero(m.trainer)
+    ):
+        hf_export_path = Path(csv_logger.log_dir) / "hf_model"
+        best_ckpt = checkpoint_callback.best_model_path
+        ckpt = torch.load(best_ckpt, map_location="cpu", weights_only=False)
+        state = {
+            k.removeprefix("model."): v
+            for k, v in ckpt["state_dict"].items()
+            if k.startswith("model.")
+        }
+        m.model.load_state_dict(state)
+        m.model.save_pretrained(str(hf_export_path))
+        m.print(f"Exported HF model to {hf_export_path}")
 
     return train_success

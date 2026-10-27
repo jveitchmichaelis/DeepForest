@@ -60,6 +60,12 @@ def main():
         dest="tags",
         help="Tag for the experiment (can be repeated, e.g. --tag baseline --tag v2). Applied to Comet if enabled.",
     )
+    train_parser.add_argument(
+        "--export-hf",
+        action="store_true",
+        dest="export_hf",
+        help="After training, export the best checkpoint as a HuggingFace model to <log_dir>/hf_model.",
+    )
 
     # Predict subcommand
     predict_parser = subparsers.add_parser(
@@ -153,6 +159,7 @@ def main():
             resume=args.resume,
             experiment_name=args.experiment_name,
             tags=args.tags,
+            export_hf=args.export_hf,
         )
 
         sys.exit(0 if res else 1)

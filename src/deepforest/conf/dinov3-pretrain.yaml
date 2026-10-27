@@ -1,0 +1,41 @@
+# Stage 1 of 2: pretrain RetinaNet with a DINOv3 backbone on lidar-derived
+# tree crowns. Run with --export-hf, then set the exported hf_model folder
+# as model.name in dinov3-finetune.yaml.
+#
+# Based on the lidar-pretrain-holdout runs on Comet (silver_brad_2424), which
+# used 4 GPUs at batch size 16 each. Set the data paths on the command line.
+defaults:
+  - config
+  - _self_
+
+architecture: 'retinanet_dinov3'
+
+# The facebook/dinov3 repositories are gated: accept the license on
+# Hugging Face and log in before first use.
+model:
+  name: 'facebook/dinov3-vitl16-pretrain-sat493m'
+  revision: 'main'
+
+num_classes: 1
+label_dict:
+  Tree: 0
+
+batch_size: 16
+workers: 16
+precision: 16-mixed
+matmul_precision: high
+
+train:
+  # Train only the feature pyramid and the detection head
+  freeze_backbone: True
+  lr: 0.04
+  epochs: 20
+  scheduler:
+    type: cosine
+    params:
+      T_max: 20
+      eta_min: 0.00001
+
+# Validate on the NEON training set
+validation:
+  val_accuracy_interval: 1

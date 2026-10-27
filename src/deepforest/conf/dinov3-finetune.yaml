@@ -1,0 +1,40 @@
+# Stage 2 of 2: fine-tune the pretrained DINOv3 RetinaNet from
+# dinov3-pretrain.yaml on the NEON benchmark hand annotations.
+#
+# Based on the lidar-pretrain-holdout runs on Comet (keen_hamster_4641,
+# mAP@50 0.567 on test_cleaned), which used 4 GPUs at batch size 16 each.
+# Set the data paths on the command line.
+defaults:
+  - config
+  - _self_
+
+architecture: 'retinanet_dinov3'
+
+# Set to the hf_model folder exported by the pretrain run, for example
+# model.name=<log_dir>/hf_model
+model:
+  name: ???
+  revision: 'main'
+
+num_classes: 1
+label_dict:
+  Tree: 0
+
+batch_size: 16
+workers: 16
+precision: 16-mixed
+matmul_precision: high
+
+train:
+  # Train only the feature pyramid and the detection head.
+  freeze_backbone: True
+  lr: 0.04
+  epochs: 20
+  scheduler:
+    type: cosine
+    params:
+      T_max: 20
+      eta_min: 0.00001
+
+validation:
+  val_accuracy_interval: 1
