@@ -52,7 +52,8 @@ def train(
         tags (list[str] | None, optional): Tags to apply to the Comet experiment.
             Defaults to None.
         export_hf (bool, optional): After training, save the best checkpoint as a
-            Hugging Face model in <log_dir>/hf_model. Needs checkpoint=True.
+            Hugging Face model in <log_dir>/hf_model and the last checkpoint in
+            <log_dir>/hf_model_last. Needs checkpoint=True.
             Defaults to False.
 
     Returns:
@@ -200,16 +201,46 @@ def train(
         and train_success
         and distributed.is_global_zero(m.trainer)
     ):
-        hf_export_path = Path(csv_logger.log_dir) / "hf_model"
-        best_ckpt = checkpoint_callback.best_model_path
-        ckpt = torch.load(best_ckpt, map_location="cpu", weights_only=False)
-        state = {
-            k.removeprefix("model."): v
-            for k, v in ckpt["state_dict"].items()
-            if k.startswith("model.")
+        log_dir = Path(csv_logger.log_dir)
+        exports = {
+            "hf_model": checkpoint_callback.best_model_path,
+            "hf_model_last": checkpoint_callback.last_model_path,
         }
-        m.model.load_state_dict(state)
-        m.model.save_pretrained(str(hf_export_path))
-        m.print(f"Exported HF model to {hf_export_path}")
+        for name, ckpt_path in exports.items():
+            export_hf_model(m, ckpt_path, log_dir / name)
+            m.print(f"Exported HF model from {ckpt_path} to {log_dir / name}")
 
     return train_success
+
+
+def export_hf_model(m: deepforest, ckpt_path: str | Path, output_dir: str | Path) -> None:
+    """Load model weights from a Lightning checkpoint and save them as a
+    Hugging Face model.
+
+    Args:
+        m: DeepForest module with the same architecture as the checkpoint.
+            Its model weights are replaced by the checkpoint weights.
+        ckpt_path: Path to the Lightning checkpoint (.ckpt).
+        output_dir: Folder to write the Hugging Face model to.
+    """
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    state = {
+        k.removeprefix("model."): v
+        for k, v in ckpt["state_dict"].items()
+        if k.startswith("model.")
+    }
+    m.model.load_state_dict(state)
+    m.model.save_pretrained(str(output_dir))
+
+
+def export_checkpoint(ckpt_path: str | Path, output_dir: str | Path) -> None:
+    """Export a Lightning checkpoint written by `deepforest train` as a Hugging
+    Face model, using the config stored in the checkpoint.
+
+    Args:
+        ckpt_path: Path to the Lightning checkpoint (.ckpt).
+        output_dir: Folder to write the Hugging Face model to.
+    """
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    m = deepforest(config=ckpt["hyper_parameters"]["config"])
+    export_hf_model(m, ckpt_path, output_dir)

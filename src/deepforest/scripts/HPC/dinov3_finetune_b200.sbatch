@@ -13,22 +13,22 @@
 # Fine-tune with dinov3-finetune.yaml. Arguments are passed to
 # `deepforest train`. Set PRETRAIN_DIR to the log_root of a pretrain job
 # to start from its newest hf_model export, otherwise pass model.name.
+# Set PRETRAIN_EXPORT=hf_model_last to start from the last epoch instead
+# of the best one.
 
 printenv | grep -i slurm | sort
 
 source .venv/bin/activate
 
 export NCCL_NVLS_ENABLE=0
-export COMET_PROJECT="${COMET_PROJECT:-lidar-pretrain-holdout}"
-if [[ -f "$HOME/.secrets/hf_token" ]]; then
-  export HF_TOKEN="$(cat "$HOME/.secrets/hf_token")"
-fi
+export COMET_PROJECT="${COMET_PROJECT:-dinov3-lidar}"
 
 if [[ -n "${PRETRAIN_DIR:-}" ]]; then
-  # Newest hf_model export under the pretrain log_root
-  HF_MODEL=$(find "$PRETRAIN_DIR" -type d -name hf_model -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+  # Newest export under the pretrain log_root
+  EXPORT="${PRETRAIN_EXPORT:-hf_model}"
+  HF_MODEL=$(find "$PRETRAIN_DIR" -type d -name "$EXPORT" -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
   if [[ -z "$HF_MODEL" ]]; then
-    echo "No hf_model folder found under $PRETRAIN_DIR"
+    echo "No $EXPORT folder found under $PRETRAIN_DIR"
     exit 1
   fi
   echo "Fine-tuning from $HF_MODEL"

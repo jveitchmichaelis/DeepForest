@@ -7,7 +7,7 @@ from omegaconf import OmegaConf
 from deepforest.conf.schema import Config as StructuredConfig
 from deepforest.scripts.evaluate import evaluate
 from deepforest.scripts.predict import predict
-from deepforest.scripts.train import train
+from deepforest.scripts.train import export_checkpoint, train
 
 
 def main():
@@ -64,7 +64,7 @@ def main():
         "--export-hf",
         action="store_true",
         dest="export_hf",
-        help="After training, export the best checkpoint as a HuggingFace model to <log_dir>/hf_model.",
+        help="After training, export the best checkpoint as a HuggingFace model to <log_dir>/hf_model and the last checkpoint to <log_dir>/hf_model_last.",
     )
 
     # Predict subcommand
@@ -117,6 +117,16 @@ def main():
     )
     evaluate_parser.add_argument(
         "-o", "--output", help="Path to save evaluation metrics summary CSV"
+    )
+
+    # Export subcommand
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Export a Lightning checkpoint from `deepforest train` as a HuggingFace model.",
+    )
+    export_parser.add_argument("checkpoint", help="Path to the .ckpt file")
+    export_parser.add_argument(
+        "-o", "--output", required=True, help="Folder to write the HuggingFace model to"
     )
 
     # Show config subcommand
@@ -172,6 +182,9 @@ def main():
             output_path=args.output,
             save_predictions=args.save_predictions,
         )
+
+    elif args.command == "export":
+        export_checkpoint(args.checkpoint, args.output)
 
     elif args.command == "config":
         print(OmegaConf.to_yaml(cfg, resolve=True))

@@ -18,8 +18,4 @@ printenv | grep -i slurm | sort
 
 source .venv/bin/activate
 
-if [[ -f "$HOME/.secrets/hf_token" ]]; then
-  export HF_TOKEN="$(cat "$HOME/.secrets/hf_token")"
-fi
-
 srun --kill-on-bad-exit=1 uv run deepforest evaluate "$@"

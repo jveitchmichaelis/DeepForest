@@ -21,9 +21,5 @@ source .venv/bin/activate
 
 # DDP hangs at NCCL init on the B200 nodes unless NVLS is disabled
 export NCCL_NVLS_ENABLE=0
-export COMET_PROJECT="${COMET_PROJECT:-lidar-pretrain-holdout}"
-if [[ -f "$HOME/.secrets/hf_token" ]]; then
-  export HF_TOKEN="$(cat "$HOME/.secrets/hf_token")"
-fi
-
+export COMET_PROJECT="${COMET_PROJECT:-dinov3-lidar}"
 srun --kill-on-bad-exit=1 uv run deepforest --config-name=dinov3-pretrain train --comet --export-hf "$@"

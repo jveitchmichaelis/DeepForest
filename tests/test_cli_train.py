@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 
 from deepforest import get_data
 from deepforest.utilities import load_config
-from deepforest.scripts.train import train
+from deepforest.scripts.train import export_checkpoint, train
 
 SCRIPT = files("deepforest.scripts").joinpath("cli.py")
 
@@ -63,6 +63,22 @@ def test_train_without_checkpoint(train_config, tmp_path):
     log_root = Path(train_config["log_root"])
     checkpoints = list(log_root.glob("*/checkpoints/*.ckpt"))
     assert len(checkpoints) == 0
+
+
+def test_train_export_hf(train_config, tmp_path):
+    """--export-hf writes the best and last checkpoints as HF models, and
+    exporting last.ckpt afterwards gives the same weights."""
+    from safetensors.torch import load_file
+
+    assert train(train_config, checkpoint=True, export_hf=True)
+    log_dir = next(Path(train_config["log_root"]).iterdir())
+    assert (log_dir / "hf_model" / "model.safetensors").exists()
+    last = load_file(log_dir / "hf_model_last" / "model.safetensors")
+
+    export_checkpoint(log_dir / "checkpoints" / "last.ckpt", tmp_path / "export")
+    exported = load_file(tmp_path / "export" / "model.safetensors")
+    assert exported.keys() == last.keys()
+    assert all((exported[k] == last[k]).all() for k in last)
 
 
 def test_train_experiment_name(train_config, tmp_path):
