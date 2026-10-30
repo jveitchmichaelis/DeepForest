@@ -270,11 +270,15 @@ class BoxDataset(TrainingDataset):
         # Apply augmentations
         image_tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float()
         boxes_tensor = torch.from_numpy(targets["boxes"]).unsqueeze(0).float()
+        # Kornia treats xmax/ymax as the last pixel inside the box, while our
+        # boxes end one pixel past it. Convert so flips and rotations stay exact.
+        boxes_tensor[..., 2:] -= 1
         augmented_image, augmented_boxes = self.transform(image_tensor, boxes_tensor)
 
         # Convert boxes to tensor
         image = augmented_image.squeeze(0)
         boxes = augmented_boxes.squeeze(0)
+        boxes[..., 2:] += 1
         labels = torch.from_numpy(targets["labels"].astype(np.int64))
 
         # Filter invalid boxes after augmentation

@@ -410,7 +410,9 @@ DeepForest supports the following augmentations optimized for object detection, 
 - **[RandomResizedCrop](https://kornia.readthedocs.io/en/latest/augmentation.module.html#kornia.augmentation.RandomResizedCrop)**: Crop image at random location and resize while preserving bounding boxes
 - **[PadIfNeeded](https://kornia.readthedocs.io/en/latest/augmentation.module.html#kornia.augmentation.PadTo)**: Pad images to minimum size
 - **RandomPadTo**: add random padding to the image
-- **[Rotate](https://kornia.readthedocs.io/en/latest/augmentation.module.html#kornia.augmentation.RandomRotation)**: Rotate images by small angles
+- **[Rotate](https://kornia.readthedocs.io/en/latest/augmentation.module.html#kornia.augmentation.RandomRotation)**: Rotate images by small angles. Be careful when using with axis-aligned boxes, as a rotation makes a box looser around objects; this is not an issue with polygons models.
+- **[Rotate90](https://kornia.readthedocs.io/en/latest/augmentation.module.html#kornia.augmentation.RandomRotation90)**: Rotate images by a random multiple of 90 degrees.
+- **[RandomScale](https://kornia.readthedocs.io/en/latest/augmentation.module.html#kornia.augmentation.RandomAffine)**: Zoom in or out about the image center (0.9 to 1.1 by default), keeping the image size
 - **[RandomBrightnessContrast](https://kornia.readthedocs.io/en/latest/augmentation.module.html#kornia.augmentation.ColorJiggle)**: Adjust brightness and contrast
 - **[HueSaturationValue](https://kornia.readthedocs.io/en/latest/augmentation.module.html#kornia.augmentation.ColorJiggle)**: Adjust color properties
 - **[GaussNoise](https://kornia.readthedocs.io/en/latest/augmentation.module.html#kornia.augmentation.RandomGaussianNoise)**: Add gaussian noise

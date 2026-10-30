@@ -385,3 +385,37 @@ def test_reordering_produces_correct_output():
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+@pytest.mark.parametrize(
+    "augmentation",
+    [
+        {"HorizontalFlip": {"p": 1.0}},
+        {"VerticalFlip": {"p": 1.0}},
+        {"Rotate90": {"times": (1, 1)}},
+        {"Rotate90": {"times": (2, 2)}},
+    ],
+)
+def test_box_follows_pixels(tmp_path, augmentation):
+    """Flipped and rotated boxes cover exactly the pixels of the object."""
+    import numpy as np
+    import pandas as pd
+    from PIL import Image
+
+    image = np.zeros((400, 400, 3), dtype=np.uint8)
+    image[10:50, 300:380] = 255
+    Image.fromarray(image).save(tmp_path / "box.png")
+    pd.DataFrame(
+        {"image_path": ["box.png"], "xmin": [300], "ymin": [10], "xmax": [380], "ymax": [50], "label": ["Tree"]}
+    ).to_csv(tmp_path / "box.csv", index=False)
+
+    ds = BoxDataset(
+        csv_file=str(tmp_path / "box.csv"),
+        root_dir=str(tmp_path),
+        augmentations=[augmentation],
+        label_dict={"Tree": 0},
+    )
+    image, targets, _ = ds[0]
+    ys, xs = torch.where(image[0] > 0.5)
+    pixels = [xs.min(), ys.min(), xs.max() + 1, ys.max() + 1]
+    assert targets["boxes"][0].tolist() == pytest.approx([float(p) for p in pixels], abs=1e-3)

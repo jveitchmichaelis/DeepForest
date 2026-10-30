@@ -168,6 +168,8 @@ _SUPPORTED_TRANSFORMS = {
     ),
     "PadIfNeeded": (K.PadTo, {"size": (800, 800)}),
     "Rotate": (K.RandomRotation, {"degrees": 15, "p": 0.5}),
+    "Rotate90": (K.RandomRotation90, {"times": (0, 3), "p": 1.0}),
+    "RandomScale": (K.RandomAffine, {"degrees": 0, "scale": (0.9, 1.1), "p": 0.5}),
     "RandomBrightnessContrast": (
         K.ColorJiggle,
         {"brightness": 0.2, "contrast": 0.2, "p": 0.5},
