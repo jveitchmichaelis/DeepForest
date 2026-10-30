@@ -36,6 +36,7 @@ train:
       T_max: 20
       eta_min: 0.00001
 
-# Validate on the NEON training set
+# map_50 gives a better target than val_loss
 validation:
   val_accuracy_interval: 1
+  checkpoint_target: map_50

@@ -105,6 +105,7 @@ class ValidationConfig:
     iou_threshold: float = 0.4
     val_accuracy_interval: int = 20
     lr_plateau_target: str = "val_loss"
+    checkpoint_target: str = "val_loss"
     augmentations: list[str] | None = field(default_factory=lambda: [])
 
 

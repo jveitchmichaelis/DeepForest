@@ -91,6 +91,9 @@ validation:
     # should work with all models
     lr_plateau_target: val_loss
 
+    # Metric used to choose the best checkpoint.
+    checkpoint_target: val_loss
+
     # Intersection over union evaluation
     iou_threshold: 0.4
     val_accuracy_interval: 20

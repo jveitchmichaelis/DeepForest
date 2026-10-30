@@ -135,11 +135,17 @@ def train(
 
     # Setup checkpoint to store in log directory
     if checkpoint:
+        target = config.validation.checkpoint_target
+        if target != "val_loss" and config.validation.val_accuracy_interval != 1:
+            raise ValueError(
+                f"validation.checkpoint_target={target} is only logged every "
+                "validation.val_accuracy_interval epochs. Set val_accuracy_interval=1."
+            )
         checkpoint_callback = ModelCheckpoint(
             dirpath=Path(csv_logger.log_dir) / "checkpoints",
             filename=f"{config.architecture}-{{epoch:02d}}-{{map_50:.2f}}",
-            monitor="val_loss",
-            mode="min",
+            monitor=target,
+            mode="min" if target.endswith("loss") else "max",
             save_top_k=1,
             save_last=True,
         )
