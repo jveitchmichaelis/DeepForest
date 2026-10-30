@@ -42,9 +42,11 @@ STRONG="train.augmentations=[HorizontalFlip,VerticalFlip,Rotate90,RandomScale,Ra
 # pretrain NAME EPOCHS TIME AUGMENTATION
 # Submits a frozen encoder pretrain and prints its job ID. The cosine
 # schedule length (T_max) is set to the number of epochs.
+# Validation on the lidar fold keeps every prediction in memory on each
+# rank, which needs more than the default 196GB.
 pretrain() {
   local name=$1 epochs=$2 time=$3 aug=$4
-  sbatch --parsable --time=$time $HPC/dinov3_pretrain_b200.sbatch \
+  sbatch --parsable --time=$time --mem=512GB $HPC/dinov3_pretrain_b200.sbatch \
     --tag round2 --tag $name log_root=$LOGS/$name \
     train.epochs=$epochs train.scheduler.params.T_max=$epochs \
     $LIDAR_DATA "$aug"

@@ -2,7 +2,6 @@
 import importlib
 import os
 import warnings
-from numbers import Number
 
 import numpy as np
 import pandas as pd
@@ -98,29 +97,35 @@ class deepforest(pl.LightningModule):
         # Box Metrics
         if self.model.task == "box":
             self.iou_metric = IntersectionOverUnion(
-                class_metrics=True, iou_threshold=self.config.validation.iou_threshold
+                class_metrics=True,
+                iou_threshold=self.config.validation.iou_threshold,
+                sync_on_compute=False,
             )
 
-            self.mAP_metric = MeanAveragePrecision(backend="faster_coco_eval")
+            self.mAP_metric = MeanAveragePrecision(
+                backend="faster_coco_eval", sync_on_compute=False
+            )
 
             self.precision_recall_metric = RecallPrecision(
                 iou_threshold=self.config.validation.iou_threshold,
                 label_dict=self.label_dict,
                 task=self.model.task,
+                sync_on_compute=False,
             )
         # Point Metrics
         elif self.model.task == "point":
-            self.mae_metric = torchmetrics.MeanAbsoluteError()
+            self.mae_metric = torchmetrics.MeanAbsoluteError(sync_on_compute=False)
             self.precision_recall_metric = RecallPrecision(
                 distance_threshold=self.config.point.distance_threshold,
                 label_dict=self.label_dict,
                 task=self.model.task,
+                sync_on_compute=False,
             )
 
         # Segmentation metrics
         if self.model.task == "polygon":
             self.mAP_metric = MeanAveragePrecision(
-                iou_type="segm", backend="faster_coco_eval"
+                iou_type="segm", backend="faster_coco_eval", sync_on_compute=False
             )
 
     def load_model(self, model_name=None, revision=None):
@@ -291,17 +296,22 @@ class deepforest(pl.LightningModule):
 
         return formatted_result.reset_index(drop=True)
 
-    def _gather_prediction_frames(self, frames):
-        """Gather prediction frames across ranks."""
+    def _gather_prediction_frames(self, frames, dst=None):
+        """Gather prediction frames across ranks.
+
+        Args:
+            frames: Prediction DataFrames from this rank.
+            dst: Rank that receives the frames. If None, every rank does.
+        """
         if not frames:
-            return distributed.gather_dataframe(pd.DataFrame())
+            return distributed.gather_dataframe(pd.DataFrame(), dst=dst)
 
         local_frames = [frame for frame in frames if not frame.empty]
         if not local_frames:
-            return distributed.gather_dataframe(frames[0].iloc[0:0].copy())
+            return distributed.gather_dataframe(frames[0].iloc[0:0].copy(), dst=dst)
 
         local_results = pd.concat(local_frames, ignore_index=True)
-        return distributed.gather_dataframe(local_results)
+        return distributed.gather_dataframe(local_results, dst=dst)
 
     def on_fit_start(self):
         if self.config.train.csv_file is None and self.existing_train_dataloader is None:
@@ -977,77 +987,79 @@ class deepforest(pl.LightningModule):
     def on_validation_epoch_start(self):
         self.predictions = []
 
+    def _validation_metrics(self) -> list:
+        """Return the validation metrics used by the current task."""
+        if self.model.task == "box":
+            return [self.iou_metric, self.mAP_metric, self.precision_recall_metric]
+        elif self.model.task == "point":
+            return [self.mae_metric, self.precision_recall_metric]
+        elif self.model.task == "polygon":
+            return [self.mAP_metric]
+        return []
+
     def _compute_epoch_metrics(self) -> dict:
         """Compute metrics and returns a Lightning-loggable dictionary.
 
         This function is called automatically at the end of validation.
+        Each rank sends its metric states to rank 0, which computes the
+        metrics and sends the values back to every rank.
         """
+        for metric in self._validation_metrics():
+            extra_lists = ("results",) if isinstance(metric, RecallPrecision) else ()
+            distributed.gather_metric(metric, dst=0, extra_lists=extra_lists)
+
         metrics = {}
+        if distributed.get_rank() == 0:
+            if self.model.task == "box":
+                # IoU and mAP
+                if len(self.iou_metric.groundtruth_labels) > 0:
+                    metrics.update(self.iou_metric.compute())
+                    # Lightning bug: claims this is a warning but it's not. See issue #16218 in Lightning-AI/pytorch-lightning
+                    output = self.mAP_metric.compute()
 
-        if self.model.task == "box":
-            # IoU and mAP
-            if len(self.iou_metric.groundtruth_labels) > 0:
-                metrics.update(self.iou_metric.compute())
-                # Lightning bug: claims this is a warning but it's not. See issue #16218 in Lightning-AI/pytorch-lightning
-                output = self.mAP_metric.compute()
+                    # Remove classes from output dict
+                    output = {
+                        key: value
+                        for key, value in output.items()
+                        if not key == "classes"
+                    }
+                    metrics.update(output)
+                metrics.update(self.precision_recall_metric.compute())
 
-                # Remove classes from output dict
-                output = {
-                    key: value for key, value in output.items() if not key == "classes"
-                }
-                metrics.update(output)
-            metrics.update(self.precision_recall_metric.compute())
+            elif self.model.task == "point":
+                metrics["val_mae"] = self.mae_metric.compute()
+                metrics.update(self.precision_recall_metric.compute())
 
-        elif self.model.task == "point":
-            metrics["val_mae"] = self.mae_metric.compute()
-            metrics.update(self.precision_recall_metric.compute())
+            # Send plain values, CUDA tensors would load on rank 0's device
+            metrics = {
+                key: value.cpu() if isinstance(value, torch.Tensor) else value
+                for key, value in metrics.items()
+            }
 
-        return metrics
-
-    def _prepare_metrics_for_sync(self, metrics: dict) -> dict:
-        """Move scalar metrics onto the module device for NCCL reduction."""
-        synced_metrics = {}
-
-        for key, value in metrics.items():
-            if isinstance(value, torch.Tensor):
-                synced_metrics[key] = value.to(self.device)
-            elif isinstance(value, Number):
-                synced_metrics[key] = torch.tensor(value, device=self.device)
-            else:
-                synced_metrics[key] = value
-
-        return synced_metrics
+        return distributed.broadcast_object(metrics)
 
     def on_validation_epoch_end(self):
-        """Compute metrics and predictions at the end of the validation
-        epoch."""
+        """Compute metrics and predictions at the end of the validation epoch.
+
+        Predictions are kept on rank 0 only.
+        """
         if self.trainer.sanity_checking:  # optional skip
             return
 
-        gathered_predictions = self._gather_prediction_frames(self.predictions)
+        gathered_predictions = self._gather_prediction_frames(self.predictions, dst=0)
         self.predictions = (
             [gathered_predictions] if not gathered_predictions.empty else []
         )
 
-        # Log epoch metrics
+        # Log epoch metrics. Every rank has the same values, so no sync is needed.
         if (self.current_epoch + 1) % self.config.validation.val_accuracy_interval == 0:
             metrics = self._compute_epoch_metrics()
-            should_sync = distributed.should_sync(self.trainer)
-            if should_sync:
-                metrics = self._prepare_metrics_for_sync(metrics)
-            self.log_dict(metrics, sync_dist=should_sync)
+            self.log_dict(metrics)
 
         # Manual reset. Lightning does not do this automatically
         # unless we log the metric objects directly
-        if self.model.task == "box":
-            self.iou_metric.reset()
-            self.mAP_metric.reset()
-            self.precision_recall_metric.reset()
-        elif self.model.task == "point":
-            self.mae_metric.reset()
-            self.precision_recall_metric.reset()
-        elif self.model.task == "polygon":
-            self.mAP_metric.reset()
+        for metric in self._validation_metrics():
+            metric.reset()
 
     def predict_step(self, batch, batch_idx):
         """Predict a batch of images with the deepforest model.
@@ -1262,13 +1274,8 @@ class deepforest(pl.LightningModule):
         self.config.validation.val_accuracy_interval = 1
 
         self.create_trainer()
+        # In multi-GPU settings, predictions are kept on rank 0 only
         validation_results = self.trainer.validate(self)
-
-        # Gather predictions from all ranks in multi-GPU settings
-        if self.trainer.world_size > 1:
-            all_predictions = [None] * self.trainer.world_size
-            torch.distributed.all_gather_object(all_predictions, self.predictions)
-            self.predictions = [pred for preds in all_predictions for pred in preds]
 
         # Concat prediction dataframes and convert numeric labels to strings
         if len(self.predictions) > 0:
