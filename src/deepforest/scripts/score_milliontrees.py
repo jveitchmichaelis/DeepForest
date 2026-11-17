@@ -5,8 +5,14 @@ map_50, box recall and box precision, with the number of images and the
 share of completely annotated images. Add three summary rows: the
 unweighted mean over sources (macro average), all images together, and
 completely annotated images only. On incompletely annotated images,
-detections of unlabelled trees count as false positives, so precision and
-mAP are underestimates there.
+detections of unlabelled trees count as false positives, so box precision
+and mAP are underestimates there.
+
+With --masks-dir (the masks folder of the official release), also compute
+MillionTrees' mask-aware precision: an unmatched prediction is not a false
+positive when at least half of its box covers tree pixels in the image's
+tree coverage mask. It uses MillionTrees' own MaskAwareDetectionPrecision,
+so the milliontrees package must be installed.
 
 The metrics match DeepForest validation: map_50 counts up to
 --max-detections detections per image, and box recall and precision use
@@ -23,8 +29,10 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
+from PIL import Image
 from torchmetrics.detection import MeanAveragePrecision
 
 from deepforest.metrics import RecallPrecision
@@ -66,21 +74,34 @@ def to_targets(frame: pd.DataFrame, image_paths, scores: bool) -> dict[str, dict
     return out
 
 
-def image_recall_precision(item: tuple) -> tuple[float, float]:
-    """Box precision and recall of one image, as RecallPrecision counts them.
+def image_metrics(item: tuple) -> tuple[float, float, float]:
+    """Box precision, box recall and mask-aware precision of one image.
 
-    Precision is NaN when the image has no predictions and recall is NaN
-    when it has no ground truth; RecallPrecision leaves such images out
-    of its averages, and so does nanmean.
+    Box precision and recall follow RecallPrecision: precision is NaN when
+    the image has no predictions and recall is NaN when it has no ground
+    truth, so nanmean leaves those images out as RecallPrecision does.
+    Mask-aware precision follows MillionTrees and is NaN without a mask.
     """
-    pred, target, iou_threshold = item
+    pred, target, iou_threshold, mask_path = item
     metric = RecallPrecision(iou_threshold=iou_threshold, label_dict=LABELS)
     metric.update([pred], [target])
     precision = (
         float(metric.precision) if metric.num_images_with_predictions else float("nan")
     )
     recall = float(metric.recall) if metric.num_images_with_ground_truth else float("nan")
-    return precision, recall
+
+    maskaware = float("nan")
+    if mask_path is not None:
+        from milliontrees.common.metrics.all_metrics import MaskAwareDetectionPrecision
+
+        mask = torch.from_numpy(np.array(Image.open(mask_path).convert("L")) > 0)
+        # One image per call, so the average that compute() returns is its value
+        metric = MaskAwareDetectionPrecision(
+            iou_threshold=iou_threshold, score_threshold=0.0
+        )
+        result = metric.compute([pred], [{**target, "tree_coverage_mask": mask}])
+        maskaware = float(result[metric.agg_metric_field])
+    return precision, recall, maskaware
 
 
 def score_by_source(
@@ -90,6 +111,7 @@ def score_by_source(
     iou_threshold: float = 0.4,
     max_detections: int = 2000,
     workers: int = 1,
+    masks_dir: Path | None = None,
 ) -> pd.DataFrame:
     """One row per source, then the macro average, all images and, when
     complete is given, completely annotated images only.
@@ -105,13 +127,30 @@ def score_by_source(
     targets = to_targets(ground_truth, images, scores=False)
     preds = to_targets(predictions, images, scores=True)
 
-    items = ((preds[image], targets[image], iou_threshold) for image in images)
+    # Masks are named by the official image file name with a .png suffix
+    mask_paths = (
+        [masks_dir / f"{Path(image).stem}.png" for image in images]
+        if masks_dir is not None
+        else [None] * len(images)
+    )
+    missing = [path for path in mask_paths if path is not None and not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"{len(missing)} masks missing, e.g. {missing[0]}")
+
+    items = (
+        (preds[image], targets[image], iou_threshold, mask)
+        for image, mask in zip(images, mask_paths, strict=True)
+    )
     if workers > 1:
         with ProcessPoolExecutor(workers) as pool:
-            values = list(pool.map(image_recall_precision, items, chunksize=16))
+            values = list(pool.map(image_metrics, items, chunksize=16))
     else:
-        values = list(map(image_recall_precision, items))
-    per_image = pd.DataFrame(values, columns=["box_precision", "box_recall"])
+        values = list(map(image_metrics, items))
+    per_image = pd.DataFrame(
+        values, columns=["box_precision", "box_recall", "maskaware_precision"]
+    )
+    if masks_dir is None:
+        per_image = per_image.drop(columns="maskaware_precision")
 
     def row(group, selected):
         result = {"group": group, "images": int(selected.sum())}
@@ -152,6 +191,11 @@ def main() -> None:
     parser.add_argument(
         "--official-csv", type=Path, help="Official release CSV with the complete column"
     )
+    parser.add_argument(
+        "--masks-dir",
+        type=Path,
+        help="masks folder of the official release, for mask-aware precision",
+    )
     parser.add_argument("--iou-threshold", type=float, default=0.4)
     parser.add_argument("--max-detections", type=int, default=2000)
     parser.add_argument(
@@ -173,6 +217,7 @@ def main() -> None:
         args.iou_threshold,
         args.max_detections,
         args.workers,
+        args.masks_dir,
     )
     with pd.option_context("display.width", 200, "display.float_format", "{:.3f}".format):
         print(scores.to_string(index=False))

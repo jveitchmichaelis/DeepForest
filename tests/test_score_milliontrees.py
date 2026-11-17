@@ -60,3 +60,32 @@ def test_workers_give_the_same_scores():
     parallel = score.score_by_source(truth, predictions, workers=2)
 
     pd.testing.assert_frame_equal(serial, parallel)
+
+
+def test_maskaware_precision_ignores_predictions_on_unlabelled_trees(tmp_path):
+    """An unmatched prediction on tree pixels is not a false positive; one
+    outside the tree coverage mask is."""
+    pytest.importorskip("milliontrees")
+    import numpy as np
+    from PIL import Image
+
+    mask = np.zeros((100, 100), dtype=np.uint8)
+    mask[40:60, 40:60] = 255  # an unlabelled tree
+    Image.fromarray(mask).save(tmp_path / "a1.png")
+    truth = boxes("A/a1.png", 1)
+    predictions = pd.concat([
+        boxes("A/a1.png", 1),  # matches the labelled tree
+        pd.DataFrame({"image_path": "A/a1.png", "xmin": [40, 80], "ymin": [40, 80],
+                      "xmax": [60, 95], "ymax": [60, 95], "label": "Tree"}),
+    ]).assign(score=0.9)
+
+    scores = score.score_by_source(truth, predictions, masks_dir=tmp_path).set_index("group")
+
+    assert scores.loc["A", "box_precision"] == pytest.approx(1 / 3)
+    assert scores.loc["A", "maskaware_precision"] == pytest.approx(1 / 2)
+
+
+def test_missing_mask_fails(tmp_path):
+    truth = boxes("A/a1.png", 1)
+    with pytest.raises(FileNotFoundError, match="masks missing"):
+        score.score_by_source(truth, truth.assign(score=0.9), masks_dir=tmp_path)
