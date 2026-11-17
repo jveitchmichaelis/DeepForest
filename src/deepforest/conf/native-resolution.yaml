@@ -1,0 +1,17 @@
+# Settings to train and validate at native resolution, for use in the defaults
+# list of another config. The model does not resize images. Training randomly
+# crops large images and pads small ones to 800 pixels. Validation pads small
+# images and keeps the top-left 800 pixels of large ones, so its scores differ
+# a little from whole-image scores. For final scores, evaluate whole images
+# with batch_size=1 validation.augmentations=[].
+model:
+  resize: False
+
+train:
+  augmentations:
+    - HorizontalFlip: {p: 0.5}
+    - RandomCrop: {size: [800, 800], pad_if_needed: true, p: 1.0}
+
+validation:
+  augmentations:
+    - PadIfNeeded: {size: [800, 800]}

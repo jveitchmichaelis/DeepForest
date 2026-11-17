@@ -1,0 +1,6 @@
+# The LVD lidar pretrain (dinov3-pretrain-lvd.yaml) at native resolution, so
+# that it sees trees at the same scale as native resolution finetunes.
+defaults:
+  - dinov3-pretrain-lvd
+  - native-resolution
+  - _self_
