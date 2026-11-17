@@ -22,12 +22,14 @@ class DeformableDetrWrapper(nn.Module):
 
     task: str = "box"
 
-    def __init__(self, config, name, revision, use_nms=False, **hf_args):
+    def __init__(self, config, name, revision, use_nms=False, resize=True, **hf_args):
         """Initialize a DeformableDetrForObjectDetection model.
 
         We assume that the provided name applies to both model and
         processor. By default this function creates a model with MS-COCO
-        initialized weights, but can be overridden if needed.
+        initialized weights, but can be overridden if needed. With
+        resize=False the processor keeps each image's size instead of
+        resizing the short side to 800 pixels (do_resize).
         """
         super().__init__()
         self.config = config
@@ -60,7 +62,7 @@ class DeformableDetrWrapper(nn.Module):
                 **model_kwargs,
             )
             self.processor = DeformableDetrImageProcessor.from_pretrained(
-                name, revision=revision, **hf_args
+                name, revision=revision, do_resize=resize, **hf_args
             )
 
             # For consistency with other DeepForest components
@@ -224,5 +226,9 @@ class Model(BaseModel):
             hf_args.setdefault("id2label", self.config.numeric_to_label_dict)
 
         return DeformableDetrWrapper(
-            self.config, name=pretrained, revision=revision, **hf_args
+            self.config,
+            name=pretrained,
+            revision=revision,
+            resize=self.config.model.resize,
+            **hf_args,
         ).to(map_location)

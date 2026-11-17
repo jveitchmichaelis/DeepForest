@@ -9,6 +9,12 @@ from torchvision.models.detection.retinanet import AnchorGenerator, RetinaNet
 from deepforest.model import BaseModel
 
 
+def _keep_size(image, target=None):
+    """Replacement for GeneralizedRCNNTransform.resize that keeps the image
+    size."""
+    return image, target
+
+
 class RetinaNetHub(RetinaNet, PyTorchModelHubMixin):
     """RetinaNet extension that allows the use of the HF Hub API."""
 
@@ -21,6 +27,7 @@ class RetinaNetHub(RetinaNet, PyTorchModelHubMixin):
         nms_thresh: float = 0.05,
         score_thresh: float = 0.5,
         label_dict: dict = None,
+        resize: bool = True,
         **kwargs,
     ):
         backbone = torchvision.models.detection.retinanet_resnet50_fpn(
@@ -44,8 +51,21 @@ class RetinaNetHub(RetinaNet, PyTorchModelHubMixin):
         self.num_classes = num_classes
         self.label_dict = label_dict
         self.kwargs = kwargs
+        self.set_resize(resize)
 
         self.update_config()
+
+    def set_resize(self, resize: bool) -> None:
+        """Turn the input resize on or off.
+
+        Torchvision resizes images so the short side is 800 pixels (long
+        side at most 1333). With resize=False, images are only
+        normalized and batched which is useful for training models where
+        you may want to preserve GSD.
+        """
+        self.resize = resize
+        if not resize:
+            self.transform.resize = _keep_size
 
     @classmethod
     def from_pretrained(
@@ -108,6 +128,7 @@ class RetinaNetHub(RetinaNet, PyTorchModelHubMixin):
             "nms_thresh": self.nms_thresh,
             "score_thresh": self.score_thresh,
             "label_dict": self.label_dict,
+            "resize": self.resize,
             **self.kwargs,
         }
 
@@ -201,6 +222,7 @@ class Model(BaseModel):
                 label_dict=label_dict,
                 detections_per_img=self.config.detections_per_img,
                 topk_candidates=self.config.topk_candidates,
+                resize=self.config.model.resize,
             )
         else:
             # Pre 2.0 compatibility, the score_threshold used to be stored under retinanet.score_thresh
@@ -218,10 +240,12 @@ class Model(BaseModel):
                 score_thresh=self.config.score_thresh,
                 detections_per_img=self.config.detections_per_img,
                 topk_candidates=self.config.topk_candidates,
+                resize=self.config.model.resize,
                 **hf_args,
             )
 
+        # Freeze the ResNet only (not the FPN):
         if self.config.train.freeze_backbone:
-            model.backbone.requires_grad_(False)
+            model.backbone.body.requires_grad_(False)
 
         return model.to(map_location)

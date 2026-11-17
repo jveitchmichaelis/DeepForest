@@ -44,6 +44,7 @@ class RetinaNetDinov3Hub(RetinaNetHub):
         score_thresh: float = 0.5,
         label_dict: dict = None,
         freeze_backbone: bool = False,
+        resize: bool = True,
         **kwargs,
     ):
         """
@@ -55,6 +56,8 @@ class RetinaNetDinov3Hub(RetinaNetHub):
             label_dict: Mapping from label name to class ID.
             freeze_backbone: If True, the DINOv3 transformer is not trained.
                 The feature pyramid layers are always trained.
+            resize: If False, images keep their own size instead of being
+                resized so the short side is 800 pixels.
             **kwargs: Passed to torchvision RetinaNet.
         """
         backbone = Dinov3Model(repo_id=backbone_weights)
@@ -90,6 +93,7 @@ class RetinaNetDinov3Hub(RetinaNetHub):
         self.label_dict = label_dict
         self.backbone_weights = backbone_weights
         self.kwargs = kwargs
+        self.set_resize(resize)
 
         self.update_config()
 
@@ -186,6 +190,7 @@ class Model(BaseModel):
             "nms_thresh": self.config.nms_thresh,
             "score_thresh": self.config.score_thresh,
             "freeze_backbone": self.config.train.freeze_backbone,
+            "resize": self.config.model.resize,
             "detections_per_img": self.config.detections_per_img,
             "topk_candidates": self.config.topk_candidates,
         }

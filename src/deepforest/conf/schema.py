@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import II, DictConfig, OmegaConf
 
 
 @dataclass
@@ -11,6 +11,7 @@ class ModelConfig:
 
     name: str | None = "weecology/deepforest-tree"
     revision: str = "main"
+    resize: bool = True
 
 
 @dataclass
@@ -20,7 +21,7 @@ class SchedulerParamsConfig:
     In most cases users should not need to change these."
     """
 
-    T_max: int = 10
+    T_max: int = II("train.epochs")
     eta_min: float = 1e-5
     lr_lambda: str = "0.95 ** epoch"
     step_size: int = 30

@@ -1159,6 +1159,22 @@ def test_epoch_evaluation_end(m, tmp_path):
     assert logged_metrics["box_precision"] == 1.0
     assert logged_metrics["box_recall"] == 1.0
 
+def test_map_counts_all_detections(m):
+    """mAP counts up to detections_per_img detections per image, not the COCO
+    limit of 100."""
+    boxes = torch.tensor([[20. * i, 0., 20. * i + 10., 10.] for i in range(150)])
+    preds = [{"boxes": boxes, "scores": torch.linspace(1, 0.5, 150),
+              "labels": torch.zeros(150, dtype=torch.int64)}]
+    targets = [{"boxes": boxes, "labels": torch.zeros(150, dtype=torch.int64)}]
+
+    m.mAP_metric.update(preds, targets)
+    result = m.mAP_metric.compute()
+    m.mAP_metric.reset()
+
+    assert m.mAP_metric.max_detection_thresholds[-1] == m.config.detections_per_img
+    assert result["map_50"] == 1.0
+
+
 def test_epoch_evaluation_end_empty(m):
     """If the model returns an empty prediction, the metrics should not fail"""
     preds = [{

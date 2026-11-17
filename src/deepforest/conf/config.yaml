@@ -22,6 +22,9 @@ topk_candidates: 1000
 model:
     name: 'weecology/deepforest-tree'
     revision: 'main'
+    # Set to False to pass images to the model at their own size; models will
+    # otherwise resize to within 800-1333 px.
+    resize: True
 
 # On CUDA, setting the matmul precision can provide speed up without affecting model performance
 # Start with 'high' for initial tests.
@@ -71,7 +74,7 @@ train:
         type:
         params:
             # Common parameters
-            T_max: 10
+            T_max: ${train.epochs}
             eta_min: 0.00001
             lr_lambda: "0.95 ** epoch"  # For lambdaLR and multiplicativeLR
             step_size: 30  # For stepLR

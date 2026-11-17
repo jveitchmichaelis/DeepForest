@@ -173,3 +173,16 @@ def test_prepare_targets_coco_format(config):
     assert annotations[1]["bbox"] == [x2, y2, w2, h2]
     assert annotations[1]["area"] == w2 * h2
     assert annotations[1]["iscrowd"] == 0
+
+
+@pytest.mark.parametrize("resize", [True, False])
+def test_create_model_resize(config, resize):
+    """With model.resize False, the processor keeps each image's size."""
+    config.model.resize = resize
+    detr_model = DeformableDetr.Model(config).create_model()
+
+    encoded = detr_model.processor.preprocess(
+        images=[torch.rand(3, 400, 600)], return_tensors="pt", do_rescale=False
+    )
+
+    assert tuple(encoded["pixel_values"].shape[-2:]) == ((800, 1200) if resize else (400, 600))
