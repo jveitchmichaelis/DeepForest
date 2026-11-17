@@ -103,7 +103,9 @@ class deepforest(pl.LightningModule):
             )
 
             self.mAP_metric = MeanAveragePrecision(
-                backend="faster_coco_eval", sync_on_compute=False
+                backend="faster_coco_eval",
+                max_detection_thresholds=sorted({1, 10, self.config.detections_per_img}),
+                sync_on_compute=False,
             )
 
             self.precision_recall_metric = RecallPrecision(
