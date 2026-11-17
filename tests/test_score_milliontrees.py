@@ -50,3 +50,13 @@ def test_images_without_folder_form_one_group():
 
     assert scores.group.tolist() == ["", "macro average", "all images"]
     assert "complete_share" not in scores
+
+
+def test_workers_give_the_same_scores():
+    truth = pd.concat([boxes("A/a1.png", 3), boxes("A/a2.png", 2), boxes("B/b1.png", 4)])
+    predictions = pd.concat([boxes("A/a1.png", 3, offset=2), boxes("B/b1.png", 2)]).assign(score=0.9)
+
+    serial = score.score_by_source(truth, predictions, workers=1)
+    parallel = score.score_by_source(truth, predictions, workers=2)
+
+    pd.testing.assert_frame_equal(serial, parallel)

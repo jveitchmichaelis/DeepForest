@@ -19,6 +19,8 @@ Usage:
 """
 
 import argparse
+import os
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import pandas as pd
@@ -64,27 +66,21 @@ def to_targets(frame: pd.DataFrame, image_paths, scores: bool) -> dict[str, dict
     return out
 
 
-def score(
-    images: list[str],
-    predictions: dict[str, dict],
-    targets: dict[str, dict],
-    iou_threshold: float,
-    max_detections: int,
-) -> dict:
-    """map_50, map, box recall and box precision for a set of images."""
-    mean_ap = MeanAveragePrecision(
-        backend="faster_coco_eval",
-        max_detection_thresholds=sorted({1, 10, max_detections}),
+def image_recall_precision(item: tuple) -> tuple[float, float]:
+    """Box precision and recall of one image, as RecallPrecision counts them.
+
+    Precision is NaN when the image has no predictions and recall is NaN
+    when it has no ground truth; RecallPrecision leaves such images out
+    of its averages, and so does nanmean.
+    """
+    pred, target, iou_threshold = item
+    metric = RecallPrecision(iou_threshold=iou_threshold, label_dict=LABELS)
+    metric.update([pred], [target])
+    precision = (
+        float(metric.precision) if metric.num_images_with_predictions else float("nan")
     )
-    recall_precision = RecallPrecision(iou_threshold=iou_threshold, label_dict=LABELS)
-    preds = [predictions[image] for image in images]
-    truth = [targets[image] for image in images]
-    mean_ap.update(preds, truth)
-    recall_precision.update(preds, truth, images)
-    result = {key: float(value) for key, value in recall_precision.compute().items()}
-    ap = mean_ap.compute()
-    result.update({"map_50": float(ap["map_50"]), "map": float(ap["map"])})
-    return result
+    recall = float(metric.recall) if metric.num_images_with_ground_truth else float("nan")
+    return precision, recall
 
 
 def score_by_source(
@@ -93,9 +89,14 @@ def score_by_source(
     complete: set[str] | None = None,
     iou_threshold: float = 0.4,
     max_detections: int = 2000,
+    workers: int = 1,
 ) -> pd.DataFrame:
     """One row per source, then the macro average, all images and, when
-    complete is given, completely annotated images only."""
+    complete is given, completely annotated images only.
+
+    Box matching is the slow step, so it runs once per image, over
+    workers processes, and each group averages the per-image values.
+    """
     images = pd.Series(ground_truth.image_path.unique())
     sources = images.str.split("/").str[0].where(images.str.contains("/"), "")
     is_complete = (
@@ -104,16 +105,29 @@ def score_by_source(
     targets = to_targets(ground_truth, images, scores=False)
     preds = to_targets(predictions, images, scores=True)
 
+    items = ((preds[image], targets[image], iou_threshold) for image in images)
+    if workers > 1:
+        with ProcessPoolExecutor(workers) as pool:
+            values = list(pool.map(image_recall_precision, items, chunksize=16))
+    else:
+        values = list(map(image_recall_precision, items))
+    per_image = pd.DataFrame(values, columns=["box_precision", "box_recall"])
+
     def row(group, selected):
         result = {"group": group, "images": int(selected.sum())}
         if is_complete is not None:
             result["complete_share"] = float(is_complete[selected].mean())
-        return {
-            **result,
-            **score(
-                images[selected].tolist(), preds, targets, iou_threshold, max_detections
-            ),
-        }
+        result.update(per_image[selected.to_numpy()].mean().to_dict())
+        mean_ap = MeanAveragePrecision(
+            backend="faster_coco_eval",
+            max_detection_thresholds=sorted({1, 10, max_detections}),
+        )
+        mean_ap.update(
+            [preds[image] for image in images[selected]],
+            [targets[image] for image in images[selected]],
+        )
+        ap = mean_ap.compute()
+        return {**result, "map_50": float(ap["map_50"]), "map": float(ap["map"])}
 
     rows = [row(source, sources.eq(source)) for source in sorted(sources.unique())]
     per_source = pd.DataFrame(rows)
@@ -140,6 +154,14 @@ def main() -> None:
     )
     parser.add_argument("--iou-threshold", type=float, default=0.4)
     parser.add_argument("--max-detections", type=int, default=2000)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count(),
+        help="Processes for box matching; defaults to the CPUs available to the job",
+    )
     parser.add_argument("-o", "--output", type=Path, help="Write the scores to this CSV")
     args = parser.parse_args()
 
@@ -150,6 +172,7 @@ def main() -> None:
         complete,
         args.iou_threshold,
         args.max_detections,
+        args.workers,
     )
     with pd.option_context("display.width", 200, "display.float_format", "{:.3f}".format):
         print(scores.to_string(index=False))
