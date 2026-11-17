@@ -419,3 +419,21 @@ def test_box_follows_pixels(tmp_path, augmentation):
     ys, xs = torch.where(image[0] > 0.5)
     pixels = [xs.min(), ys.min(), xs.max() + 1, ys.max() + 1]
     assert targets["boxes"][0].tolist() == pytest.approx([float(p) for p in pixels], abs=1e-3)
+
+
+
+def test_pad_if_needed_pads_small_and_crops_large():
+    """PadIfNeeded (kornia PadTo) pads small images and, through negative
+    padding, keeps the top-left of large ones. milliontrees-dinov3.yaml relies
+    on both for validation."""
+    transform = get_transform([{"PadIfNeeded": {"size": [800, 800]}}])
+    boxes = torch.tensor([[[10., 10., 60., 60.]]])
+    for height, width in [(400, 400), (600, 2000), (2000, 2000)]:
+        image = torch.rand(1, 3, height, width) + 0.1
+        out, out_boxes = transform(image, boxes)
+
+        assert tuple(out.shape[-2:]) == (800, 800)
+        kept_h, kept_w = min(height, 800), min(width, 800)
+        assert torch.equal(out[..., :kept_h, :kept_w], image[..., :kept_h, :kept_w])
+        assert out[..., kept_h:, :].eq(0).all() and out[..., kept_w:].eq(0).all()
+        assert out_boxes.squeeze().tolist() == [10., 10., 60., 60.]

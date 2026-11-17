@@ -81,6 +81,31 @@ def test_train_export_hf(train_config, tmp_path):
     assert all((exported[k] == last[k]).all() for k in last)
 
 
+def test_train_checkpoint_target(train_config):
+    """With checkpoint_target=map_50, the best checkpoint is the epoch with
+    the highest map_50."""
+    import pandas as pd
+
+    train_config.train.epochs = 2
+    train_config.validation.val_accuracy_interval = 1
+    train_config.validation.checkpoint_target = "map_50"
+    assert train(train_config, checkpoint=True)
+
+    log_dir = next(Path(train_config["log_root"]).iterdir())
+    metrics = pd.read_csv(log_dir / "metrics.csv").dropna(subset=["map_50"])
+    best_epoch = int(metrics.loc[metrics["map_50"].idxmax(), "epoch"])
+    best = [p for p in (log_dir / "checkpoints").glob("*.ckpt") if p.name != "last.ckpt"]
+    assert len(best) == 1
+    assert f"epoch:{best_epoch:02d}" in best[0].name
+
+
+def test_train_checkpoint_target_needs_interval(train_config):
+    train_config.validation.val_accuracy_interval = 2
+    train_config.validation.checkpoint_target = "map_50"
+    with pytest.raises(ValueError, match="val_accuracy_interval"):
+        train(train_config, checkpoint=True)
+
+
 def test_train_experiment_name(train_config, tmp_path):
     assert train(train_config, checkpoint=False, experiment_name="my-experiment")
     log_root = Path(train_config["log_root"])

@@ -1,4 +1,5 @@
 # test retinanet
+import copy
 import os
 
 import pytest
@@ -85,3 +86,52 @@ def test_retinanet_override_class_error():
     # Mismatch between label_dict and class count
     with pytest.raises(ValueError):
         retinanet.RetinaNetHub.from_pretrained("weecology/deepforest-tree", num_classes=1, label_dict={"Tree": 0, "Shrub": 1})
+
+
+@pytest.mark.parametrize("resize", [True, False])
+def test_create_model_resize(config, resize):
+    """With model.resize False, the model keeps each image's size."""
+    config = copy.deepcopy(config)
+    config.num_classes = 1
+    config.label_dict = {"Tree": 0}
+    config.model.resize = resize
+    model = retinanet.Model(config).create_model()
+    model.eval()
+
+    images, _ = model.transform([torch.rand(3, 400, 600)])
+
+    assert images.image_sizes == [(800, 1200) if resize else (400, 600)]
+
+
+@pytest.mark.parametrize("freeze_backbone", [False, True])
+def test_freeze_backbone(config, monkeypatch, freeze_backbone):
+    """Freeze only the ResNet when the training config requests it.
+
+    The FPN and head stay trainable, as in retinanet_dinov3.
+    """
+    model = torch.nn.Module()
+    model.backbone = torch.nn.Module()
+    model.backbone.body = torch.nn.Linear(2, 2)
+    model.backbone.fpn = torch.nn.Linear(2, 2)
+    model.head = torch.nn.Linear(2, 2)
+    monkeypatch.setattr(retinanet.RetinaNetHub, "from_pretrained", lambda *args, **kwargs: model)
+    config = copy.deepcopy(config)
+    config.train.freeze_backbone = freeze_backbone
+
+    loaded = retinanet.Model(config).create_model(pretrained="test/checkpoint")
+
+    assert all(p.requires_grad != freeze_backbone for p in loaded.backbone.body.parameters())
+    assert all(p.requires_grad for p in loaded.backbone.fpn.parameters())
+    assert all(p.requires_grad for p in loaded.head.parameters())
+
+
+def test_resize_saved_with_model(tmp_path):
+    """The resize setting is saved with the model and restored on load."""
+    model = retinanet.RetinaNetHub(num_classes=1, label_dict={"Tree": 0}, resize=False)
+    model.save_pretrained(tmp_path)
+
+    loaded = retinanet.RetinaNetHub.from_pretrained(tmp_path)
+    images, _ = loaded.eval().transform([torch.rand(3, 400, 600)])
+
+    assert loaded.resize is False
+    assert images.image_sizes == [(400, 600)]
