@@ -109,6 +109,8 @@ validation:
     preload_images: False
     validate_coordinates: True
     size:
+    # Augmentations for validation, in the same format as train.augmentations
+    augmentations: []
 
     # For retinanet you may prefer val_classification, but the default val_loss
     # should work with all models
