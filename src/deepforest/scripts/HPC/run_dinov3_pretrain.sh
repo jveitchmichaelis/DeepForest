@@ -1,5 +1,5 @@
 #!/bin/bash
-# Round 2 of the DINOv3 lidar pretrain experiments.
+# Lidar fold-0 pretrain duration and augmentation comparison.
 #
 # Four pretrains on lidar fold 0, all with the DINOv3 encoder frozen:
 #   - 2 or 10 epochs
@@ -18,37 +18,33 @@ HPC=src/deepforest/scripts/HPC
 LIDAR=/blue/ewhite/veitchmichaelisj/deeplidar/output
 SPLITS=/home/veitchmichaelisj/code/milliontrees_transformers/data/cv_splits
 NEON=/orange/ewhite/DeepForest/NEON_benchmark/images
-LOGS=logs/dinov3_lidar/round2
+LOGS=logs/dinov3_lidar/lidar-fold0
 
 export COMET_PROJECT=dinov3-lidar
 mkdir -p slurm_logs
 
-# Some NEON and lidar boxes are a single pixel, which fails the coordinate check
-NO_CHECK="train.validate_coordinates=False validation.validate_coordinates=False"
-
 # Pretrain on lidar fold 0 train, validate on lidar fold 0 val
 LIDAR_DATA="train.csv_file=$LIDAR/folds/all_annotations_train_fold_0.csv train.root_dir=$LIDAR
-            validation.csv_file=$LIDAR/folds/all_annotations_val_fold_0.csv validation.root_dir=$LIDAR
-            $NO_CHECK"
+            validation.csv_file=$LIDAR/folds/all_annotations_val_fold_0.csv validation.root_dir=$LIDAR"
 
 # Finetune on NEON train_cleaned, validate on NEON test_cleaned
 NEON_DATA="train.csv_file=$SPLITS/train_cleaned.csv train.root_dir=$NEON
-           validation.csv_file=$SPLITS/test_cleaned.csv validation.root_dir=$NEON
-           $NO_CHECK"
+           validation.csv_file=$SPLITS/test_cleaned.csv validation.root_dir=$NEON"
 
 FLIP="train.augmentations=[HorizontalFlip]"
 STRONG="train.augmentations=[HorizontalFlip,VerticalFlip,Rotate90,RandomScale,RandomBrightnessContrast,MotionBlur]"
 
 # pretrain NAME EPOCHS TIME AUGMENTATION
 # Submits a frozen encoder pretrain and prints its job ID. The cosine
-# schedule length (T_max) is set to the number of epochs.
+# schedule length (T_max) is set to the number of epochs. These runs picked
+# hf_model by val_loss, before map_50 became the dinov3-pretrain target.
 # Validation on the lidar fold keeps every prediction in memory on each
 # rank, which needs more than the default 196GB.
 pretrain() {
   local name=$1 epochs=$2 time=$3 aug=$4
   sbatch --parsable --time=$time --mem=512GB $HPC/dinov3_pretrain_b200.sbatch \
-    --tag round2 --tag $name log_root=$LOGS/$name \
-    train.epochs=$epochs train.scheduler.params.T_max=$epochs \
+    --experiment-name "$name" --tag lidar-fold0 --tag "$name" "log_root=$LOGS" \
+    "train.epochs=$epochs" validation.checkpoint_target=val_loss \
     $LIDAR_DATA "$aug"
 }
 
@@ -59,8 +55,8 @@ finetune() {
   local job=$1 pretrain_name=$2 name=$3 seed=$4 aug=$5
   PRETRAIN_DIR=$LOGS/$pretrain_name PL_GLOBAL_SEED=$seed \
     sbatch --dependency=afterok:$job $HPC/dinov3_finetune_b200.sbatch \
-    --tag round2 --tag $name log_root=$LOGS/$name-seed$seed \
-    train.freeze_backbone=False $NEON_DATA "$aug"
+    --experiment-name "$name-seed$seed" --tag lidar-fold0 --tag "$name" "log_root=$LOGS" \
+    $NEON_DATA "$aug"
 }
 
 # 20 epochs on all lidar tiles took 11-13 h, so these time limits leave room.

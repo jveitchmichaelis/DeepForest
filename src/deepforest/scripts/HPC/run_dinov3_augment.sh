@@ -20,21 +20,20 @@ export COMET_PROJECT=dinov3-lidar
 mkdir -p slurm_logs
 
 # Train on NEON train_cleaned, validate on NEON test_cleaned.
-# Some NEON boxes are a single pixel, which fails the coordinate check.
 NEON_DATA="train.csv_file=$SPLITS/train_cleaned.csv train.root_dir=$NEON
-           validation.csv_file=$SPLITS/test_cleaned.csv validation.root_dir=$NEON
-           train.validate_coordinates=False validation.validate_coordinates=False"
+           validation.csv_file=$SPLITS/test_cleaned.csv validation.root_dir=$NEON"
 
 FLIP="train.augmentations=[HorizontalFlip]"
 STRONG="train.augmentations=[HorizontalFlip,VerticalFlip,Rotate90,RandomScale,RandomBrightnessContrast,MotionBlur]"
 
 # finetune NAME SEED AUGMENTATION [OVERRIDES...]
-# Submits a NEON finetune logged under $OUT/NAME-seedSEED.
+# Submits a NEON finetune logged under $OUT/<comet_run_name>.
 finetune() {
   local name=$1 seed=$2 aug=$3
   shift 3
-  PL_GLOBAL_SEED=$seed sbatch $HPC/dinov3_finetune_b200.sbatch \
-    --tag augment --tag $name log_root=$OUT/$name-seed$seed \
+  MODEL_CONFIG="${MODEL_CONFIG:-dinov3-finetune}" PL_GLOBAL_SEED=$seed \
+    sbatch $HPC/dinov3_finetune_b200.sbatch \
+    --experiment-name "$name-seed$seed" --tag augment --tag "$name" "log_root=$OUT" \
     $NEON_DATA "$aug" "$@"
 }
 
@@ -52,12 +51,10 @@ finetune dinov3-strong 2 "$STRONG" $DINOV3
 
 # Release checkpoint: a ResNet-50 RetinaNet, so no pretrain folder
 unset PRETRAIN_DIR
-RELEASE="architecture=retinanet model.name=weecology/deepforest-tree train.lr=0.02"
+MODEL_CONFIG=resnet-finetune finetune release-flip 0 "$FLIP"
+MODEL_CONFIG=resnet-finetune finetune release-flip 1 "$FLIP"
+MODEL_CONFIG=resnet-finetune finetune release-flip 2 "$FLIP"
 
-finetune release-flip 0 "$FLIP" $RELEASE
-finetune release-flip 1 "$FLIP" $RELEASE
-finetune release-flip 2 "$FLIP" $RELEASE
-
-finetune release-strong 0 "$STRONG" $RELEASE
-finetune release-strong 1 "$STRONG" $RELEASE
-finetune release-strong 2 "$STRONG" $RELEASE
+MODEL_CONFIG=resnet-finetune finetune release-strong 0 "$STRONG"
+MODEL_CONFIG=resnet-finetune finetune release-strong 1 "$STRONG"
+MODEL_CONFIG=resnet-finetune finetune release-strong 2 "$STRONG"

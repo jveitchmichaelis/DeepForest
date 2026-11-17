@@ -1,0 +1,16 @@
+# Finetune the ResNet-50 RetinaNet on NEON or MillionTrees.
+# Starts from the release model by default. Set model.name to an exported
+# hf_model_last folder, or to null for the COCO detector.
+defaults:
+  - tree-detector
+  - _self_
+
+architecture: retinanet
+
+model:
+  name: weecology/deepforest-tree
+  revision: cc21436bc5d572dde8ff5f93c1e71a32f563cace
+
+train:
+  freeze_backbone: False
+  lr: 0.02

@@ -35,4 +35,4 @@ if [[ -n "${PRETRAIN_DIR:-}" ]]; then
   set -- "model.name=$HF_MODEL" "$@"
 fi
 
-srun --kill-on-bad-exit=1 uv run deepforest --config-name=dinov3-finetune train --comet --export-hf "$@"
+srun --kill-on-bad-exit=1 uv run deepforest --config-name="${MODEL_CONFIG:-dinov3-finetune}" train --comet --export-hf "$@"

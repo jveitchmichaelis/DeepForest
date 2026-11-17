@@ -1,40 +1,21 @@
-# Stage 2 of 2: fine-tune the pretrained DINOv3 RetinaNet from
-# dinov3-pretrain.yaml on the NEON benchmark hand annotations.
+# Stage 2 of 2: finetune the DINOv3 RetinaNet on NEON or MillionTrees.
+# Starts from the LVD encoder with a new detection head by default. Set
+# model.name to an hf_model_last folder exported by dinov3-pretrain.yaml to
+# start from a lidar pretrain.
 #
-# Based on the lidar-pretrain-holdout runs on Comet (keen_hamster_4641,
-# mAP@50 0.567 on test_cleaned), which used 4 GPUs at batch size 16 each.
-# Set the data paths on the command line.
+# The LVD lidar followup on Comet (dinov3-lidar) favored an unfrozen finetune.
 defaults:
-  - config
+  - tree-detector
   - _self_
 
-architecture: 'retinanet_dinov3'
+architecture: retinanet_dinov3
 
-# Set to the hf_model folder exported by the pretrain run, for example
-# model.name=<log_dir>/hf_model
+# The facebook/dinov3 repositories are gated: accept the license on
+# Hugging Face and log in before first use.
 model:
-  name: ???
-  revision: 'main'
-
-num_classes: 1
-label_dict:
-  Tree: 0
-
-batch_size: 16
-workers: 16
-precision: 16-mixed
-matmul_precision: high
+  name: facebook/dinov3-vitl16-pretrain-lvd1689m
+  revision: ea8dc2863c51be0a264bab82070e3e8836b02d51
 
 train:
-  # Train only the feature pyramid and the detection head.
-  freeze_backbone: True
+  freeze_backbone: False
   lr: 0.04
-  epochs: 20
-  scheduler:
-    type: cosine
-    params:
-      T_max: 20
-      eta_min: 0.00001
-
-validation:
-  val_accuracy_interval: 1

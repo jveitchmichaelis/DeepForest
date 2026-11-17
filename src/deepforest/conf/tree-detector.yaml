@@ -1,0 +1,27 @@
+# Shared settings for the single-class tree detector recipes:
+# resnet-finetune, dinov3-pretrain and dinov3-finetune.
+# Batch size 16 per GPU, for 4 B200 GPUs. Set the data paths on the
+# command line.
+defaults:
+  - config
+  - _self_
+
+num_classes: 1
+label_dict:
+  Tree: 0
+
+batch_size: 16
+workers: 16
+precision: 16-mixed
+matmul_precision: high
+
+train:
+  epochs: 20
+  # NEON and lidar annotations include one-pixel boxes, which fail this check
+  validate_coordinates: False
+  scheduler:
+    type: cosine
+
+validation:
+  validate_coordinates: False
+  val_accuracy_interval: 1

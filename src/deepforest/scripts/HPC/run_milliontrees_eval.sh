@@ -6,7 +6,8 @@
 #
 #   bash src/deepforest/scripts/HPC/run_milliontrees_eval.sh NAME CONFIG [OVERRIDES...]
 #
-# Results go to logs/milliontrees/evaluation/NAME-{neon,mt}.csv. Set DEPENDENCY
+# Metrics go to logs/milliontrees/evaluation/NAME-{neon,mt}.csv and predictions
+# to NAME-{neon,mt}-predictions.csv, for per-source scores. Set DEPENDENCY
 # to a job ID to start after that job succeeds, and DRY_RUN=true to print the
 # commands. Run from the repository root.
 set -euo pipefail
@@ -33,6 +34,7 @@ evaluate() {
   local -a command=(sbatch --parsable "--export=ALL,MODEL_CONFIG=$config"
     ${DEPENDENCY:+"--dependency=afterok:$DEPENDENCY"} --job-name="eval-$name-$test"
     "$HPC/milliontrees_eval_b200.sbatch" "$csv" --root-dir "$images" -o "$OUT/$name-$test.csv"
+    --save-predictions "$OUT/$name-$test-predictions.csv"
     batch_size=1 "validation.augmentations=[]" detections_per_img=2000 topk_candidates=2000
     "$@")
   if [[ "${DRY_RUN:-false}" == true ]]; then

@@ -1,0 +1,12 @@
+# Lidar pretrain from the LVD-1689M encoder, 10 epochs. This is the recipe of
+# steady_archway_4101 on Comet (dinov3-lidar).
+defaults:
+  - dinov3-pretrain
+  - _self_
+
+model:
+  name: facebook/dinov3-vitl16-pretrain-lvd1689m
+  revision: ea8dc2863c51be0a264bab82070e3e8836b02d51
+
+train:
+  epochs: 10
