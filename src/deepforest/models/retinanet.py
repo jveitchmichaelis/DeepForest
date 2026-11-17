@@ -221,4 +221,7 @@ class Model(BaseModel):
                 **hf_args,
             )
 
+        if self.config.train.freeze_backbone:
+            model.backbone.requires_grad_(False)
+
         return model.to(map_location)

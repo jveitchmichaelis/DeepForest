@@ -98,7 +98,7 @@ def train(
                 experiment_name = comet_logger.experiment.get_name()
             # Store experiment ID (key) for later re-logging to comet
             experiment_id = comet_logger.experiment.get_key()
-            if experiment_name is None:
+            if experiment_name:
                 version = ""
             if tags:
                 comet_logger.experiment.add_tags(tags)
