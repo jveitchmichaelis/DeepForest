@@ -4,7 +4,7 @@
 #SBATCH --partition=hpg-b200
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=196GB
-#SBATCH --time=24:00:00
+#SBATCH --time=01:00:00
 #SBATCH --gpus=4
 #SBATCH --ntasks-per-node=4
 #SBATCH --output=./slurm_logs/%x-%j.out
@@ -14,7 +14,7 @@
 # `deepforest train`. Set PRETRAIN_DIR to the log_root of a pretrain job
 # to start from its newest hf_model export, otherwise pass model.name.
 # Set PRETRAIN_EXPORT=hf_model_last to start from the last epoch instead
-# of the best one.
+# of the best one. A 20-epoch NEON finetune takes about 15 minutes.
 
 printenv | grep -i slurm | sort
 

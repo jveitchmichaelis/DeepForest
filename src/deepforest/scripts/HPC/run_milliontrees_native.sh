@@ -53,10 +53,11 @@ submit() {
   sbatch --parsable "$@"
 }
 
-# The lidar validation keeps every prediction in memory, so it needs 512 GB
+# The lidar validation keeps every prediction in memory, so it needs 512 GB.
+# The 10-epoch LVD pretrain steady_archway_4101 took 6.1 hours.
 pretrain=$(COMET_PROJECT=dinov3-lidar submit \
   "--export=ALL,MODEL_CONFIG=dinov3-pretrain-lvd-native,PL_GLOBAL_SEED=0" \
-  --job-name="$PRETRAIN" --time=12:00:00 --mem=512GB "$HPC/dinov3_pretrain_b200.sbatch" \
+  --job-name="$PRETRAIN" --time=09:00:00 --mem=512GB "$HPC/dinov3_pretrain_b200.sbatch" \
   --experiment-name "$PRETRAIN" --tag lvd-lidar-native "log_root=$PRETRAIN_LOGS" \
   "train.csv_file=$LIDAR/folds/all_annotations_train_fold_0.csv" "train.root_dir=$LIDAR" \
   "validation.csv_file=$LIDAR/folds/all_annotations_val_fold_0.csv" "validation.root_dir=$LIDAR")

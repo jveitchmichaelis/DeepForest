@@ -4,11 +4,13 @@
 #SBATCH --partition=hpg-b200
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=512GB
-#SBATCH --time=24:00:00
+#SBATCH --time=02:00:00
 #SBATCH --gpus=4
 #SBATCH --ntasks-per-node=4
 #SBATCH --output=./slurm_logs/%x-%j.out
 #SBATCH --error=./slurm_logs/%x-%j.err
+
+# A 20-epoch MillionTrees finetune takes about 45 minutes (mt-lvd-lidar on Comet)
 
 set -euo pipefail
 
