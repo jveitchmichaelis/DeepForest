@@ -124,6 +124,59 @@ def clip_boxes_to_image(
     return clipped, valid
 
 
+def neon_locations(names: pd.Series) -> pd.Series:
+    """NEON plot (SITE_NNN) or 1 km tile (SITE_easting_northing) named by each
+    image file, or NaN.
+
+    Plot images are named like OSBS_029.tif or
+    OSBS_029_2019_<source>.tif. Tile crops are named like
+    2018_TEAK_3_315000_4096000_image_12.tif.
+    """
+    names = names.str.split("/").str[-1]
+    plot = names.str.extract(r"^([A-Z]{4}_\d{3})(?:[_.])")[0]
+    tile = names.str.extract(r"^\d{4}_([A-Z]{4})_\d+_(\d+_\d+)_image")
+    return plot.fillna(tile[0] + "_" + tile[1])
+
+
+def exclude_holdout_overlap(
+    frames: dict[str, pd.DataFrame], holdout_csv: Path
+) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, dict]:
+    """Remove images from the NEON plots or 1 km tiles of a held-out test set,
+    such as NEON test_cleaned.csv, from every split."""
+    holdout = pd.read_csv(
+        holdout_csv, usecols=["image_path"]
+    ).image_path.drop_duplicates()
+    locations = neon_locations(holdout)
+    if locations.isna().all():
+        raise ValueError(f"No NEON plot or tile names found in {holdout_csv}")
+    held = set(locations.dropna())
+
+    excluded = []
+    for split, frame in frames.items():
+        names = frame.image_path.drop_duplicates()
+        matches = neon_locations(names)
+        hit = names[matches.isin(held)]
+        excluded.append(
+            pd.DataFrame(
+                {"official_filename": hit, "split": split, "location": matches[hit.index]}
+            )
+        )
+        frames[split] = frame.loc[~frame.image_path.isin(hit)].reset_index(drop=True)
+    excluded = pd.concat(excluded, ignore_index=True).sort_values(
+        ["split", "official_filename"]
+    )
+
+    audit = {
+        "holdout_csv": str(holdout_csv),
+        "holdout_csv_sha256": sha256(holdout_csv),
+        "holdout_images": len(holdout),
+        "holdout_images_without_location": int(locations.isna().sum()),
+        "holdout_locations": len(held),
+        "excluded_holdout_images": len(excluded),
+    }
+    return frames, excluded, audit
+
+
 def exclude_cross_split_duplicates(
     frames: dict[str, pd.DataFrame], images: pd.DataFrame
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -344,9 +397,15 @@ def export_dataset(
     output: Path,
     split_scheme: str,
     progress_interval_seconds: float = 30,
+    holdout_csv: Path | None = None,
 ) -> dict:
     """Validate imagery and write deterministic CSVs plus a provenance
-    manifest."""
+    manifest.
+
+    With holdout_csv, images from the same NEON plots or 1 km tiles as
+    that test set are removed and listed in
+    excluded_holdout_overlap.csv.
+    """
     if progress_interval_seconds <= 0:
         raise ValueError("progress_interval_seconds must be positive")
 
@@ -354,6 +413,16 @@ def export_dataset(
     print(f"Reading {source}", flush=True)
     official = pd.read_csv(source, low_memory=False)
     frames, audit = convert_annotations(official)
+    excluded_holdout = pd.DataFrame(columns=["official_filename", "split", "location"])
+    if holdout_csv is not None:
+        frames, excluded_holdout, holdout_audit = exclude_holdout_overlap(
+            frames, holdout_csv
+        )
+        audit.update(holdout_audit)
+        print(
+            f"Excluded {len(excluded_holdout)} images that overlap {holdout_csv}",
+            flush=True,
+        )
 
     retained = pd.concat(frames.values()).image_path.unique()
     source_keys = official.source.str.lower().str.replace(r"[^a-z0-9]", "", regex=True)
@@ -529,6 +598,7 @@ def export_dataset(
         )
     image_manifest.to_csv(output / "images.csv", index=False)
     excluded_duplicates.to_csv(output / "excluded_duplicates.csv", index=False)
+    excluded_holdout.to_csv(output / "excluded_holdout_overlap.csv", index=False)
 
     audit.update(
         {
@@ -549,7 +619,12 @@ def export_dataset(
             "selection_method": "10 percent of official train images per source, ranked by SHA256 filename; sources with one image remain in train",
             "artifacts": {
                 f"{name}.csv": sha256(output / f"{name}.csv")
-                for name in (*frames, "images", "excluded_duplicates")
+                for name in (
+                    *frames,
+                    "images",
+                    "excluded_duplicates",
+                    "excluded_holdout_overlap",
+                )
             },
             "counts": {
                 split: {"boxes": len(frame), "images": frame.image_path.nunique()}
@@ -859,6 +934,11 @@ def main() -> None:
         help="Maximum interval between preparation progress messages.",
     )
     parser.add_argument(
+        "--holdout-csv",
+        type=Path,
+        help="Test CSV (for example NEON test_cleaned.csv); images from the same NEON plots or 1 km tiles are removed.",
+    )
+    parser.add_argument(
         "--split-scheme",
         default="within-distribution",
         choices=["within-distribution", "out-of-distribution"],
@@ -948,7 +1028,9 @@ def main() -> None:
         return
 
     output = target / "deepforest"
-    audit = export_dataset(data_dir, output, args.split_scheme, args.progress_interval)
+    audit = export_dataset(
+        data_dir, output, args.split_scheme, args.progress_interval, args.holdout_csv
+    )
     audit.update(provenance)
     (output / "manifest.json").write_text(json.dumps(audit, indent=2) + "\n")
 

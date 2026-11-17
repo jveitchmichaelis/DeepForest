@@ -306,3 +306,42 @@ def test_duplicate_content_keeps_held_out_image_and_excludes_training_copy():
     assert retained.official_filename.tolist() == ["unique.png", "test.png"]
     assert set(exclusions.official_filename) == {"train.png", "selection.png"}
 
+
+
+def test_neon_locations_reads_plots_and_tiles():
+    names = pd.Series([
+        "OSBS_029.tif",
+        "Weecology_University_Florida/ABBY_069_2018_317158098_0_Weecology_University_Florida.png",
+        "2018_TEAK_3_315000_4096000_image_12.tif",
+        "Other/scene_01.png",
+    ])
+
+    assert mt.neon_locations(names).tolist()[:3] == ["OSBS_029", "ABBY_069", "TEAK_315000_4096000"]
+    assert pd.isna(mt.neon_locations(names)[3])
+
+
+def test_exclude_holdout_overlap_removes_same_plots_and_tiles(tmp_path):
+    holdout = tmp_path / "test_cleaned.csv"
+    pd.DataFrame({"image_path": ["OSBS_029.tif", "2018_TEAK_3_315000_4096000_image_12.tif"]}).to_csv(
+        holdout, index=False)
+    frames = {
+        "train": pd.DataFrame({"image_path": [
+            "OSBS_029_2019_Weecology.png", "OSBS_030_2019_Weecology.png", "other.png"]}),
+        "test": pd.DataFrame({"image_path": [
+            "2019_TEAK_3_315000_4096000_image_40_Weecology.png", "2019_TEAK_3_316000_4096000_image_1.png"]}),
+    }
+
+    frames, excluded, audit = mt.exclude_holdout_overlap(frames, holdout)
+
+    assert frames["train"].image_path.tolist() == ["OSBS_030_2019_Weecology.png", "other.png"]
+    assert frames["test"].image_path.tolist() == ["2019_TEAK_3_316000_4096000_image_1.png"]
+    assert excluded.location.tolist() == ["TEAK_315000_4096000", "OSBS_029"]
+    assert audit["excluded_holdout_images"] == 2
+
+
+def test_exclude_holdout_overlap_needs_neon_names(tmp_path):
+    holdout = tmp_path / "test.csv"
+    pd.DataFrame({"image_path": ["scene_01.png"]}).to_csv(holdout, index=False)
+
+    with pytest.raises(ValueError, match="No NEON plot or tile names"):
+        mt.exclude_holdout_overlap({"train": pd.DataFrame({"image_path": ["a.png"]})}, holdout)
