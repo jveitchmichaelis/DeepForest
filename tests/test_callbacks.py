@@ -2,6 +2,7 @@
 import glob
 import os
 from unittest.mock import MagicMock, Mock
+from PIL import Image
 
 import pytest
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -199,3 +200,27 @@ def test_create_checkpoint(m, tmp_path):
     m.trainer.fit(m)
 
     assert (tmp_path / 'model.ckpt').exists()
+
+
+def test_prediction_sample_shows_augmented_validation_image(download_release, tmp_path):
+    """Check plottig is valid with augmented images."""
+   
+
+    m = main.deepforest(config_args={
+        "train": {"csv_file": get_data("example.csv"),
+                  "root_dir": os.path.dirname(get_data("example.csv")), "epochs": 1},
+        "validation": {"csv_file": get_data("example.csv"),
+                       "root_dir": os.path.dirname(get_data("example.csv")),
+                       "val_accuracy_interval": 1,
+                       "augmentations": [{"PadIfNeeded": {"size": [200, 200]}}]},
+        "batch_size": 1, "workers": 0, "log_root": str(tmp_path / "logs"),
+    })
+    m.load_model("weecology/deepforest-tree")
+    im_callback = callbacks.ImagesCallback(save_dir=tmp_path, every_n_epochs=1,
+                                           prediction_samples=1, dataset_samples=0)
+    m.create_trainer(callbacks=[im_callback], limit_train_batches=1)
+    m.trainer.fit(m)
+
+    saved = list((tmp_path / "predictions").glob("*.png"))
+    assert saved
+    assert Image.open(saved[0]).size == (200, 200)

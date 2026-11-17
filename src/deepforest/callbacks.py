@@ -170,16 +170,19 @@ class ImagesCallback(Callback):
         for image_name in selected_images:
             pred_df = df[df.image_path == image_name]
 
-            targets = utilities.format_geometry(
-                dataset.annotations_for_path(image_name, return_tensor=True), scores=False
-            )
+            # Plot the image and targets as the model saw them, after the
+            # validation augmentations (for example a crop to the input size)
+            index = int(np.flatnonzero(dataset.image_names == image_name)[0])
+            image, targets, _ = dataset[index]
+            targets = utilities.format_geometry(targets, scores=False)
+            image = (255 * image.cpu().numpy().transpose((1, 2, 0))).astype(np.uint8)
 
-            # Assume that validation images are un-augmented
             basename = Path(image_name).stem + f"_{trainer.global_step}"
             fig = visualize.plot_results(
                 basename=basename,
                 results=pred_df,
                 ground_truth=targets,
+                image=image,
                 savedir=out_dir,
                 results_color=results_color,
                 thickness=self.thickness,
@@ -199,7 +202,10 @@ class ImagesCallback(Callback):
                 .to_dict()
             )
 
-            metadata = {"pred_count": len(pred_df), "gt_count": len(targets)}
+            metadata = {
+                "pred_count": len(pred_df),
+                "gt_count": 0 if targets is None else len(targets),
+            }
             metadata.update(stats)
 
             with open(os.path.join(out_dir, basename + ".json"), "w") as fp:
