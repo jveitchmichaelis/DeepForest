@@ -1,5 +1,5 @@
 #!/bin/bash
-# One frozen LVD lidar pretrain: fold 0, 10 epochs, flip only.
+# One LVD lidar pretrain (frozen by default): fold 0, 10 epochs, flip only.
 # Follow with three unfrozen, flip-only NEON finetunes (seeds 0, 1, 2).
 #
 # Start from hf_model_last. Compare finetune epoch 19 manually and use
@@ -8,6 +8,7 @@
 #
 # Run from the repository root:
 #   bash src/deepforest/scripts/HPC/run_dinov3_lvd.sh
+# Pass train.freeze_backbone=False to unfreeze the backbone during pretraining.
 set -euo pipefail
 
 HPC=src/deepforest/scripts/HPC
@@ -31,7 +32,7 @@ PRETRAIN_SOURCE=$LOGS/lvd-lidar-pretrain
 job=$(MODEL_CONFIG=dinov3-pretrain-lvd PL_GLOBAL_SEED=0 \
   sbatch --parsable --time=12:00:00 --mem=512GB "$HPC/dinov3_pretrain_b200.sbatch" \
   --experiment-name lvd-lidar-pretrain --tag lvd-lidar-followup "log_root=$LOGS" \
-  "${LIDAR_DATA[@]}")
+  "${LIDAR_DATA[@]}" "$@")
 echo "LVD pretrain job: $job; logs: $LOGS"
 
 for seed in 0 1 2; do
